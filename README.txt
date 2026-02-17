@@ -8,13 +8,21 @@ Ensure your folder looks like this before proceeding:
 Plaintext
 
 SparxLess-AI/
+
 ├── Icon/
+
 │   └── SettingIcon.png
+
 ├── manifest.json
+
 ├── popup.html
+
 ├── popup.css
+
 ├── popup.js
+
 └── content.js
+
 2. How to Install (Chrome/Edge/Brave)
 Open your browser and navigate to chrome://extensions.
 
