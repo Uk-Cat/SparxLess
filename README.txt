@@ -1,6 +1,6 @@
 README: SparxLess Installation
 
-V1.1.0
+V1.2.0
 
 1. Project Structure
 Ensure your folder looks like this before proceeding:
