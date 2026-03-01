@@ -1,7 +1,5 @@
 README: SparxLess AI Installation
 
-Note: This is meant for future development using ai read README.TXT instead (Althrough this is the exact same, some devices dont support .md)
-
 V1.2.0
 
 1. Project Structure
@@ -9,14 +7,14 @@ Ensure your folder looks like this before proceeding:
 
 Plaintext
 
-/SparxLess
-  ├── Icon/
-  │    └── SettingIcon.png
-  ├── manifest.json
-  ├── popup.html
-  ├── popup.css
-  ├── popup.js
-  └── content.js
+  /SparxLess
+    ├── Icon/
+    │    └── SettingIcon.png
+    ├── manifest.json
+    ├── popup.html
+    ├── popup.css
+    ├── popup.js
+    └── content.js
 2. How to Install (Chrome/Edge/Brave)
 Open your browser and navigate to chrome://extensions.
 
@@ -49,6 +47,10 @@ The extension will automatically detect the text.
 Click SOLVE PROBLEM.
 
 The AI will calculate the answer, display the reasoning, and attempt to fill the input box automatically.
+
+Future plans:
+ - Adding support for more and different AI APIs
+ - Adding a global answer database (so you get the answer without using ai, just from people who had that question before)
 
 All credits goes to:
 Ant - For compiling and testing the extension
