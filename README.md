@@ -1,4 +1,4 @@
-README: SparxLess AI Installation
+README: SparxLess Installation
 
 V1.2.0
 
@@ -37,7 +37,7 @@ Select the SparxLess-AI folder.
 Click the Puzzle Piece icon in your browser toolbar and "Pin" SparxLess AI for easy access.
 
 3. Setting Up
-Click the SparxLess AI icon.
+Click the SparxLess icon.
 
 Click the Settings Icon (top right of the popup).
 
