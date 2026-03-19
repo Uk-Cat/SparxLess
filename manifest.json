@@ -1,20 +1,39 @@
 {
   "manifest_version": 3,
-  "name": "SparxLess",
+  "name": "Sparx Maths Helper",
   "version": "1.2.0",
-  "description" : "An extension to help complete your sparx math homework. You will need atleast a free Gemini API Key to be able to use the ai powering this. However, the extraction tool for prompting AI is still there. P.S You need an Verified 18+ Google Account to get an Gemini API Key",
-  "permissions": ["activeTab", "scripting", "storage"],
-  "host_permissions": [
-    "https://generativelanguage.googleapis.com/*",
-    "https://*.sparx-learning.com/*"
+  "description": "Automatically saves Sparx Maths questions to the Unconfirmed table on answer submission.",
+
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "tabs"
   ],
-  "action": {
-    "default_popup": "popup.html"
+
+  "host_permissions": [
+    "https://*.sparxmaths.uk/*",
+    "https://*.sparxmaths.com/*",
+    "https://*.sparx-learning.com/*",
+    "https://uxcwmzmktamtlyvwzsua.supabase.co/*"
+  ],
+
+  "background": {
+    "service_worker": "background.js"
   },
+
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Sparx Helper"
+  },
+
   "content_scripts": [
     {
-      "matches": ["https://*.sparx-learning.com/*"],
-      "js": ["content.js"]
+      "matches": [
+        "https://*.sparxmaths.uk/*",
+        "https://*.sparxmaths.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
     }
   ]
 }
