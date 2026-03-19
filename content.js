@@ -1,9 +1,10 @@
 // ============================================================
-// content.js — Sparx Maths Auto-Submit to Supabase
-// Extraction based on confirmed React fiber structure.
+// content.js - Sparx Maths Auto-Submit to Supabase
+// Logs question + image ID the instant a question loads.
+// Posts to Supabase when the user submits their answer.
 // ============================================================
 
-// ── 1. React Fiber Helpers ───────────────────────────────────
+// -- 1. React Fiber Helpers ----------------------------------
 
 function findReact(dom) {
   for (const key in dom) {
@@ -14,23 +15,37 @@ function findReact(dom) {
   return null;
 }
 
-/**
- * BFS through a React props/children tree.
- * maxProperties raised to 300 to handle deeply nested Sparx layouts.
- */
-function findInReactTree(node, predicate, maxProperties = 300) {
-  let count = 0;
-  const stack = [node];
+function findInReactTree(node, predicate, maxProperties) {
+  maxProperties = maxProperties || 300;
+  var count = 0;
+  var stack = [node];
   while (stack.length && count < maxProperties) {
-    const cur = stack.shift();
-    try {
-      if (predicate(cur)) return cur;
-    } catch {}
+    var cur = stack.shift();
+    try { if (predicate(cur)) return cur; } catch (e) {}
     if (Array.isArray(cur)) {
-      stack.push(...cur);
+      stack.push.apply(stack, cur);
     } else if (cur && typeof cur === "object") {
-      for (const k in cur) {
-        try { stack.push(cur[k]); } catch {}
+      for (var k in cur) { try { stack.push(cur[k]); } catch (e) {} }
+    }
+    count++;
+  }
+  return null;
+}
+
+function findInTree(node, predicate, walkable, maxProperties) {
+  walkable = walkable || [];
+  maxProperties = maxProperties || 300;
+  var count = 0;
+  var stack = [node];
+  while (stack.length && count < maxProperties) {
+    var cur = stack.shift();
+    try { if (predicate(cur)) return cur; } catch (e) {}
+    if (Array.isArray(cur)) {
+      stack.push.apply(stack, cur);
+    } else if (cur && typeof cur === "object") {
+      var keys = walkable.length ? walkable : Object.keys(cur);
+      for (var i = 0; i < keys.length; i++) {
+        try { if (keys[i] in cur) stack.push(cur[keys[i]]); } catch (e) {}
       }
     }
     count++;
@@ -38,246 +53,204 @@ function findInReactTree(node, predicate, maxProperties = 300) {
   return null;
 }
 
-/**
- * BFS through a plain data tree, optionally limited to specific keys.
- */
-function findInTree(node, predicate, options = {}) {
-  const { walkable = [], maxProperties = 300 } = options;
-  let count = 0;
-  const stack = [node];
-  while (stack.length && count < maxProperties) {
-    const cur = stack.shift();
-    try {
-      if (predicate(cur)) return cur;
-    } catch {}
-    if (Array.isArray(cur)) {
-      stack.push(...cur);
-    } else if (cur && typeof cur === "object") {
-      const keys = walkable.length ? walkable : Object.keys(cur);
-      for (const k of keys) {
-        try { if (k in cur) stack.push(cur[k]); } catch {}
-      }
-    }
-    count++;
-  }
-  return null;
-}
-
-// ── 2. Answer Extraction ─────────────────────────────────────
+// -- 2. Answer Extraction ------------------------------------
 
 function extractAnswers(inputProps) {
-  const answers = [];
-
-  if (inputProps.number_fields && Object.keys(inputProps.number_fields).length > 0) {
-    Object.values(inputProps.number_fields).forEach(f => {
+  var answers = [];
+  if (inputProps.number_fields) {
+    Object.values(inputProps.number_fields).forEach(function(f) {
       if (f.value !== undefined && f.value !== "") answers.push(String(f.value));
     });
   }
-  if (inputProps.text_fields && Object.keys(inputProps.text_fields).length > 0) {
-    Object.values(inputProps.text_fields).forEach(f => {
+  if (inputProps.text_fields) {
+    Object.values(inputProps.text_fields).forEach(function(f) {
       if (f.value) answers.push(f.value);
     });
   }
-  if (inputProps.cards && Object.keys(inputProps.cards).length > 0) {
-    Object.values(inputProps.cards).forEach(c => {
-      if (c.slot_ref && c.content?.[0]?.text) answers.push(c.content[0].text);
+  if (inputProps.cards) {
+    Object.values(inputProps.cards).forEach(function(c) {
+      if (c.slot_ref && c.content && c.content[0] && c.content[0].text) {
+        answers.push(c.content[0].text);
+      }
     });
   }
-  if (inputProps.choices && Object.keys(inputProps.choices).length > 0) {
-    Object.values(inputProps.choices).forEach(c => {
-      if (c.selected && c.content?.[0]?.text) answers.push(c.content[0].text);
+  if (inputProps.choices) {
+    Object.values(inputProps.choices).forEach(function(c) {
+      if (c.selected && c.content && c.content[0] && c.content[0].text) {
+        answers.push(c.content[0].text);
+      }
     });
   }
-
   return answers;
 }
 
-// ── 3. Main Extraction ───────────────────────────────────────
+// -- 3. Main Extraction --------------------------------------
 
-/**
- * Confirmed fiber structure (from diagnostic output):
- *
- * inputSection.layout = {
- *   element: "group",
- *   type: ["multi-part", ...],
- *   content: [
- *     {
- *       element: "group",
- *       type: ["question"],
- *       content: [
- *         {
- *           element: "group",
- *           type: ["question-text"],       ← we want this node's content
- *           content: [
- *             { element: "text", text: "Calculate the size of angle $y$..." }
- *           ]
- *         },
- *         {
- *           element: "figure-ref",
- *           type: ["question-image"],
- *           figure: { image: "2734b91f-fadc-4520-a6ae-fc16381e241a", ... }
- *         }
- *       ]
- *     },
- *     ...
- *   ]
- * }
- *
- * bookworkCode lives inside QuestionInfo's children array, not as a direct prop.
- */
 function extractQuestionData() {
-  const questionWrapper = document.querySelector('[class*="_QuestionWrapper_"]');
-  const questionInfo    = document.querySelector('[class*="_QuestionInfo_"]');
+  var questionWrapper = document.querySelector('[class*="_QuestionWrapper_"]');
+  var questionInfo    = document.querySelector('[class*="_QuestionInfo_"]');
 
   if (!questionWrapper || !questionInfo) {
-    return { error: "DOM elements not found — are you on a Sparx question page?" };
+    return { error: "DOM elements not found - are you on a Sparx question page?" };
   }
 
-  const questionFiber = findReact(questionWrapper);
-  const infoFiber     = findReact(questionInfo);
+  var questionFiber = findReact(questionWrapper);
+  var infoFiber     = findReact(questionInfo);
 
   if (!questionFiber || !infoFiber) {
-    return { error: "React fiber not found — page may still be loading." };
+    return { error: "React fiber not found - page may still be loading." };
   }
 
   try {
-    // ── 3a. Find the layout+input section ───────────────────
-    // The direct children prop of QuestionWrapper holds the layout
-    const inputSection = findInReactTree(
+    // Find the section that has both layout and input
+    var inputSection = findInReactTree(
       questionFiber.memoizedProps.children,
-      n => n && n.layout && n.input
+      function(n) { return n && n.layout && n.input; }
     );
 
     if (!inputSection) {
       return { error: "Could not find inputSection in React tree." };
     }
 
-    const layout = inputSection.layout;
+    var layout = inputSection.layout;
 
-    // ── 3b. Extract question text ────────────────────────────
-    // Find the group node whose type array includes "question-text"
-    const questionTextGroup = findInTree(
+    // Extract question text
+    // layout.content -> find group with type ["question-text"] -> find element:"text"
+    var questionTextGroup = findInTree(
       layout,
-      n => n && Array.isArray(n.type) && n.type.includes("question-text"),
-      { walkable: ["content"] }
+      function(n) { return n && Array.isArray(n.type) && n.type.indexOf("question-text") !== -1; },
+      ["content"]
     );
 
-    // Inside that group, find the first text element
-    const questionText = findInTree(
+    var questionTextNode = findInTree(
       questionTextGroup,
-      n => n && n.element === "text" && typeof n.text === "string",
-      { walkable: ["content"] }
-    )?.text?.trim() ?? "";
-
-    // ── 3c. Extract image ID from fiber (not DOM) ────────────
-    // Find the figure-ref node with type "question-image"
-    // Its figure.image field is the UUID we want
-    const figureRef = findInTree(
-      layout,
-      n => n && n.element === "figure-ref" && n.figure?.image,
-      { walkable: ["content"] }
+      function(n) { return n && n.element === "text" && typeof n.text === "string"; },
+      ["content"]
     );
 
-    const imageId = figureRef?.figure?.image ?? null;
-    // e.g. "2734b91f-fadc-4520-a6ae-fc16381e241a"
+    var questionText = questionTextNode ? questionTextNode.text.trim() : "";
 
-    // ── 3d. Extract bookwork code ────────────────────────────
-    // QuestionInfo memoizedProps = { className, children: Array(3) }
-    // The bookwork code text is somewhere inside that children array.
-    // We BFS the entire infoFiber subtree looking for a string that
-    // matches the typical bookwork code pattern (letter + number, e.g. "B4")
-    let bookworkCode = null;
+    // Extract image ID from fiber (figure-ref node has figure.image UUID)
+    var figureRef = findInTree(
+      layout,
+      function(n) { return n && n.element === "figure-ref" && n.figure && n.figure.image; },
+      ["content"]
+    );
 
-    // First try: walk the React fiber tree upward from QuestionInfo
-    // looking for a bookworkCode prop (some Sparx versions have it)
-    let fiberNode = infoFiber;
-    for (let i = 0; i < 20; i++) {
-      if (fiberNode?.memoizedProps?.bookworkCode) {
+    var imageId = figureRef ? figureRef.figure.image : null;
+
+    // Extract bookwork code - walk fiber parents first
+    var bookworkCode = null;
+    var fiberNode = infoFiber;
+    for (var i = 0; i < 20; i++) {
+      if (fiberNode && fiberNode.memoizedProps && fiberNode.memoizedProps.bookworkCode) {
         bookworkCode = fiberNode.memoizedProps.bookworkCode;
         break;
       }
-      fiberNode = fiberNode?.return;
+      fiberNode = fiberNode ? fiberNode.return : null;
     }
-
-    // Second try: scan the rendered children text nodes for a bookwork pattern
+    // Fallback: read text from the DOM and match pattern like "B4"
     if (!bookworkCode) {
-      const allText = questionInfo.innerText || "";
-      const match   = allText.match(/\b([A-Z]\d+)\b/);
+      var allText = questionInfo.innerText || "";
+      var match = allText.match(/\b([A-Z]\d+)\b/);
       if (match) bookworkCode = match[1];
     }
+    if (!bookworkCode) bookworkCode = "unknown-" + Date.now();
 
-    // Fallback
-    if (!bookworkCode) bookworkCode = `unknown-${Date.now()}`;
-
-    // ── 3e. Extract answers ──────────────────────────────────
-    const answers = extractAnswers(inputSection.input);
+    var answers = extractAnswers(inputSection.input);
 
     return {
       question:     questionText,
       bookworkCode: bookworkCode,
-      imageId:      imageId,     // UUID string or null
+      imageId:      imageId,
       answers:      answers,
     };
 
   } catch (err) {
-    return { error: `Extraction error: ${err.message}\n${err.stack}` };
+    return { error: "Extraction error: " + err.message };
   }
 }
 
-// ── 4. Auto-Submit ───────────────────────────────────────────
+// -- 4. Instant Logger (fires on question load) --------------
 
-let lastSubmittedQuestion = null;
+var lastLoggedQuestion    = null;
+var lastSubmittedQuestion = null;
+var lastUrl               = location.href;
+var debounceTimer         = null;
+
+function tryLogQuestion() {
+  var data = extractQuestionData();
+  if (!data || data.error || !data.question) return;
+  if (data.question === lastLoggedQuestion) return; // already logged this one
+
+  lastLoggedQuestion    = data.question;
+  lastSubmittedQuestion = null; // reset submit dedupe for new question
+
+  console.log("[Sparx Ext] ======================================");
+  console.log("[Sparx Ext] NEW QUESTION DETECTED");
+  console.log("[Sparx Ext] Question :", data.question);
+  console.log("[Sparx Ext] Image ID :", data.imageId || "(no image on this question)");
+  console.log("[Sparx Ext] Bookwork :", data.bookworkCode);
+  console.log("[Sparx Ext] ======================================");
+}
+
+// Watch the whole DOM for changes - when Sparx renders a new question,
+// wait 400ms for React to finish, then extract and log.
+new MutationObserver(function() {
+  if (location.href !== lastUrl) {
+    lastUrl = location.href;
+  }
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(tryLogQuestion, 400);
+}).observe(document.body, { childList: true, subtree: true });
+
+// Also try immediately in case question is already on screen when script loads
+setTimeout(tryLogQuestion, 800);
+
+// -- 5. Auto-Submit on Answer Submission ---------------------
 
 function autoSubmit() {
-  const data = extractQuestionData();
+  var data = extractQuestionData();
 
-  if (data?.error) {
-    console.warn("[Sparx Ext] Skipped — extraction error:", data.error);
+  if (!data || data.error) {
+    console.warn("[Sparx Ext] Submit skipped - extraction error:", data ? data.error : "null");
     return;
   }
   if (!data.question) {
-    console.warn("[Sparx Ext] Skipped — question text was empty.");
+    console.warn("[Sparx Ext] Submit skipped - question text empty.");
     return;
   }
-  // Dedupe: don't re-submit the same question twice
   if (data.question === lastSubmittedQuestion) {
-    console.log("[Sparx Ext] Skipped — already submitted this question.");
-    return;
+    return; // already submitted this question
   }
   lastSubmittedQuestion = data.question;
 
-  chrome.runtime.sendMessage({ action: "POST_TO_SUPABASE", payload: data }, (response) => {
-    if (response?.success) {
-      console.log("[Sparx Ext] ✅ Saved to Supabase");
-      console.log("[Sparx Ext] 📝 Question :", data.question);
-      console.log("[Sparx Ext] 🖼️  Image ID :", data.imageId ?? "(no image)");
-      console.log("[Sparx Ext] 📖 Bookwork :", data.bookworkCode);
-      console.log("[Sparx Ext] 💬 Answers  :", data.answers);
+  console.log("[Sparx Ext] Submitting to Supabase...");
+
+  chrome.runtime.sendMessage({ action: "POST_TO_SUPABASE", payload: data }, function(response) {
+    if (response && response.success) {
+      console.log("[Sparx Ext] Saved to Supabase successfully");
     } else {
-      console.error("[Sparx Ext] ❌ Save failed:", response?.error ?? "Unknown error");
+      console.error("[Sparx Ext] Save failed:", response ? response.error : "no response");
     }
   });
 }
 
-// ── 5. Submit Button Detection ───────────────────────────────
+// -- 6. Submit Button Detection ------------------------------
 
-/**
- * Sparx submit buttons say "Check", "Done", or show an arrow-right icon.
- * We walk up to 4 parent levels from the click target to find the button.
- */
 function isSubmitButton(el) {
-  let node = el;
-  for (let i = 0; i < 4; i++) {
+  var node = el;
+  for (var i = 0; i < 4; i++) {
     if (!node) break;
     if (node.tagName === "BUTTON") {
-      const text  = (node.innerText || "").toLowerCase().trim();
-      const label = (node.getAttribute("aria-label") || "").toLowerCase();
+      var text  = (node.innerText || "").toLowerCase().trim();
+      var label = (node.getAttribute("aria-label") || "").toLowerCase();
       if (
         text  === "check"  ||
         text  === "done"   ||
         text  === "next"   ||
-        label.includes("check") ||
-        label.includes("next")  ||
+        label.indexOf("check") !== -1 ||
+        label.indexOf("next")  !== -1 ||
         node.querySelector('[data-icon="arrow-right"]') ||
         node.querySelector('[data-icon="check"]')
       ) return true;
@@ -287,42 +260,30 @@ function isSubmitButton(el) {
   return false;
 }
 
-document.addEventListener("click", (e) => {
+document.addEventListener("click", function(e) {
   if (!isSubmitButton(e.target)) return;
-  // Wait 300 ms for React to flush any final answer state before we read it
   setTimeout(autoSubmit, 300);
-}, true); // capture phase — fires before React's own handlers
+}, true);
 
-// ── 6. Manual Trigger (popup) ────────────────────────────────
+// -- 7. Manual Trigger (popup) -------------------------------
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener(function(message, _sender, sendResponse) {
   if (message.action !== "SAVE_QUESTION") return;
 
-  const data = extractQuestionData();
+  var data = extractQuestionData();
 
-  if (data?.error) {
+  if (data && data.error) {
     sendResponse({ success: false, error: data.error });
     return true;
   }
-  if (!data.question) {
+  if (!data || !data.question) {
     sendResponse({ success: false, error: "Question text was empty." });
     return true;
   }
 
   chrome.runtime.sendMessage(
     { action: "POST_TO_SUPABASE", payload: data },
-    res => sendResponse(res)
+    function(res) { sendResponse(res); }
   );
   return true;
 });
-
-// ── 7. URL-change Guard ──────────────────────────────────────
-
-// Reset the dedupe guard when Sparx navigates to a new question
-let lastUrl = location.href;
-new MutationObserver(() => {
-  if (location.href !== lastUrl) {
-    lastUrl = location.href;
-    lastSubmittedQuestion = null;
-  }
-}).observe(document.body, { childList: true, subtree: true });
