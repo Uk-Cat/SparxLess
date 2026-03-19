@@ -2,38 +2,20 @@
   "manifest_version": 3,
   "name": "SparxLess",
   "version": "1.2.0",
-  "description": "An extension to help complete your Sparx maths homework.",
-
-  "permissions": ["activeTab", "scripting", "storage", "tabs"],
-
+  "description": "An extension to help complete your sparx math homework. You will need at least a free Gemini API Key to use the AI. The extraction tool for prompting AI is also available. Answers to questions are now automatically saved for bookwork checks.",
+  "permissions": ["activeTab", "scripting", "storage"],
   "host_permissions": [
-    "https://*.sparxmaths.uk/*",
-    "https://*.sparxmaths.com/*",
-    "https://*.sparx-learning.com/*",
-    "https://maths.sparx-learning.com/*",
     "https://generativelanguage.googleapis.com/*",
     "https://openrouter.ai/*",
-    "https://uxcwmzmktamtlyvwzsua.supabase.co/*"
+    "https://*.sparx-learning.com/*"
   ],
-
   "action": {
     "default_popup": "popup.html"
   },
-
-  "background": {
-    "service_worker": "background.js"
-  },
-
   "content_scripts": [
     {
-      "matches": [
-        "https://*.sparxmaths.uk/*",
-        "https://*.sparxmaths.com/*",
-        "https://*.sparx-learning.com/*",
-        "https://maths.sparx-learning.com/*"
-      ],
-      "js": ["content.js"],
-      "run_at": "document_idle"
+      "matches": ["https://*.sparx-learning.com/*"],
+      "js": ["content.js"]
     }
   ]
 }
