@@ -1,12 +1,9 @@
 const LOGO_URL = "https://static.sparx-learning.com/maths/49f67c3f6d3820553ea268777b7794e6f449e1fd/assets/sparx_maths_logo-BRwQ1-wz.svg";
 
-// ─── BOOKWORK STORAGE KEY ────────────────────────────────────────────────────
+// ─── STORAGE KEYS ────────────────────────────────────────────────────────────
 const BOOKWORK_STORAGE_KEY = "SparxLessBookwork";
+const PENDING_STORAGE_KEY  = "SparxLessPending"; // persists until overwritten by next interaction
 
-/**
- * Read the full bookwork answer store from chrome.storage.local.
- * Returns a promise that resolves to an object: { [bookworkCode]: [...entries] }
- */
 function getBookworkStore() {
     return new Promise(resolve => {
         chrome.storage.local.get([BOOKWORK_STORAGE_KEY], result => {
@@ -15,27 +12,20 @@ function getBookworkStore() {
     });
 }
 
-/**
- * Write the full bookwork store back to chrome.storage.local.
- */
 function setBookworkStore(store) {
     return new Promise(resolve => {
         chrome.storage.local.set({ [BOOKWORK_STORAGE_KEY]: store }, resolve);
     });
 }
 
-// ─── ANSWER EXTRACTION ───────────────────────────────────────────────────────
+// ─── NOISE FILTER ────────────────────────────────────────────────────────────
 
-/**
- * Filter out instructions and metadata
- */
 function isNoise(text) {
     return ["Question Preview", "Bookwork code", "To pick up a draggable"].some(p => text.startsWith(p));
 }
 
-/**
- * LaTeX Walker: Prevents double-reading numbers
- */
+// ─── LATEX-AWARE TEXT EXTRACTION ─────────────────────────────────────────────
+
 function extractTextNodes(node) {
     if (node.classList && node.classList.contains('katex')) {
         const annotation = node.querySelector('annotation[encoding="application/x-tex"]');
@@ -66,67 +56,8 @@ function findAndExtractAll() {
     return results.join('\n\n');
 }
 
-// ─── BOOKWORK SAVING (ported from SparxSolver main.js) ───────────────────────
+// ─── QUESTION TEXT ────────────────────────────────────────────────────────────
 
-/**
- * Extract the current bookwork code from the page.
- * Looks for the bookwork code element that Sparx renders.
- */
-function getCurrentBookworkCode() {
-    // Sparx renders bookwork code in an element with class containing "_BookworkCode_" or similar
-    const codeEl = document.querySelector('[class*="_BookworkCode_"], [class*="_Bookwork_"]');
-    if (codeEl) {
-        // The code is usually the last text content, e.g. "Bookwork code: 3B" → extract "3B"
-        const text = codeEl.innerText || codeEl.textContent;
-        const match = text.match(/Bookwork code[:\s]+([A-Z0-9]+)/i);
-        if (match) return match[1].trim();
-        // Fallback: return any short alphanumeric code directly
-        const fallback = text.trim().replace(/\s+/g, '');
-        if (/^[A-Z0-9]{1,4}$/i.test(fallback)) return fallback;
-    }
-    return null;
-}
-
-/**
- * Extract answers currently entered by the student.
- * Ported from SparxSolver's Ds() function — covers number inputs, card slots, and multiple-choice.
- */
-function extractCurrentAnswers() {
-    const answers = [];
-
-    // Number / text input fields (e.g. BIP inputs)
-    document.querySelectorAll('input[data-ref="BIP"], input[type="text"], input[type="number"]').forEach(input => {
-        if (input.value && input.value.trim()) {
-            answers.push(input.value.trim());
-        }
-    });
-
-    // Card drag-and-drop slots — filled cards have text content
-    document.querySelectorAll('[class*="_CardContent_"]:not([class*="_CardContentEmpty_"])').forEach(card => {
-        const text = card.innerText?.trim();
-        if (text) answers.push(text);
-    });
-
-    // Multiple-choice tiles that are selected
-    document.querySelectorAll('[class*="_Tile_"][class*="_selected_"], [class*="_Tile_"][aria-pressed="true"]').forEach(tile => {
-        const annotation = tile.querySelector('annotation[encoding="application/x-tex"]');
-        const text = annotation ? annotation.textContent.trim() : tile.innerText?.trim();
-        if (text) answers.push(text);
-    });
-
-    // Generic selected/checked choices
-    document.querySelectorAll('[class*="_Choice_"][class*="_selected_"], [class*="_Option_"][aria-selected="true"]').forEach(choice => {
-        const text = choice.innerText?.trim();
-        if (text && !answers.includes(text)) answers.push(text);
-    });
-
-    return [...new Set(answers)]; // deduplicate
-}
-
-/**
- * Extract the current question text (the unique question identifier).
- * Ported from SparxSolver's yt() — uses the first TextElement as the question ID.
- */
 function getCurrentQuestionText() {
     const containers = document.querySelectorAll('[class*="_TextElement_"], [class*="_QuestionContainer_"]');
     for (const container of containers) {
@@ -136,62 +67,169 @@ function getCurrentQuestionText() {
     return null;
 }
 
+// ─── IMAGE ID EXTRACTION ──────────────────────────────────────────────────────
+
+function getCurrentImageId() {
+    const imgs = document.querySelectorAll('img');
+    const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+    for (const img of imgs) {
+        const src = img.src || '';
+        if (src === LOGO_URL) continue;
+        if (!src.includes('sparx-learning.com') && !src.includes('sparxmaths')) continue;
+        const match = src.match(uuidRegex);
+        if (match) return match[0];
+    }
+    return null;
+}
+
+// ─── ANSWER EXTRACTION ───────────────────────────────────────────────────────
+
+function getCurrentAnswer() {
+    const values = [];
+
+    // Numeric/text inputs — covers data-ref="BQB", data-ref="BIP", and plain number fields
+    document.querySelectorAll('input[type="text"], input[type="number"], input[inputmode="decimal"], input[inputmode="numeric"]').forEach(input => {
+        const val = input.value?.trim();
+        if (val) values.push(val);
+    });
+
+    // Filled drag-drop card slots
+    document.querySelectorAll('[class*="_CardContent_"]:not([class*="_CardContentEmpty_"])').forEach(card => {
+        const text = card.innerText?.trim();
+        if (text) values.push(text);
+    });
+
+    // Selected multiple-choice tiles
+    document.querySelectorAll('[class*="_Tile_"][class*="_selected_"], [class*="_Tile_"][aria-pressed="true"]').forEach(tile => {
+        const annotation = tile.querySelector('annotation[encoding="application/x-tex"]');
+        const text = annotation ? annotation.textContent.trim() : tile.innerText?.trim();
+        if (text) values.push(text);
+    });
+
+    // Generic selected choices
+    document.querySelectorAll('[class*="_Choice_"][class*="_selected_"], [class*="_Option_"][aria-selected="true"]').forEach(choice => {
+        const text = choice.innerText?.trim();
+        if (text) values.push(text);
+    });
+
+    return [...new Set(values)].join(', ') || null;
+}
+
+// ─── PENDING TEMP STORE ───────────────────────────────────────────────────────
+
 /**
- * Save the current question + answers to chrome.storage.local under the bookwork code.
- * Ported from SparxSolver's yt() function.
+ * Snapshot the current question + imageId + answer into chrome.storage.local.
+ * This persists across popup opens and is only overwritten when called again
+ * (i.e. on every interaction, and once on page load).
+ * The SAVE_QUESTION handler always reads from here first.
  */
+function savePending() {
+    const question = getCurrentQuestionText();
+    const imageId  = getCurrentImageId();
+    const answer   = getCurrentAnswer();
+
+    // Only write if we have at least a question — don't blank out a previous entry
+    if (!question) return;
+
+    chrome.storage.local.set({
+        [PENDING_STORAGE_KEY]: { question, imageId: imageId ?? null, answer: answer ?? null }
+    });
+}
+
+// ─── BOOKWORK SAVING ──────────────────────────────────────────────────────────
+
+function getCurrentBookworkCode() {
+    const codeEl = document.querySelector('[class*="_BookworkCode_"], [class*="_Bookwork_"]');
+    if (codeEl) {
+        const text  = codeEl.innerText || codeEl.textContent;
+        const match = text.match(/Bookwork code[:\s]+([A-Z0-9]+)/i);
+        if (match) return match[1].trim();
+        const fallback = text.trim().replace(/\s+/g, '');
+        if (/^[A-Z0-9]{1,4}$/i.test(fallback)) return fallback;
+    }
+    return null;
+}
+
+function extractCurrentAnswers() {
+    const answers = [];
+
+    document.querySelectorAll('input[type="text"], input[type="number"], input[inputmode="decimal"], input[inputmode="numeric"]').forEach(input => {
+        const val = input.value?.trim();
+        if (val) answers.push(val);
+    });
+
+    document.querySelectorAll('[class*="_CardContent_"]:not([class*="_CardContentEmpty_"])').forEach(card => {
+        const text = card.innerText?.trim();
+        if (text) answers.push(text);
+    });
+
+    document.querySelectorAll('[class*="_Tile_"][class*="_selected_"], [class*="_Tile_"][aria-pressed="true"]').forEach(tile => {
+        const annotation = tile.querySelector('annotation[encoding="application/x-tex"]');
+        const text = annotation ? annotation.textContent.trim() : tile.innerText?.trim();
+        if (text) answers.push(text);
+    });
+
+    document.querySelectorAll('[class*="_Choice_"][class*="_selected_"], [class*="_Option_"][aria-selected="true"]').forEach(choice => {
+        const text = choice.innerText?.trim();
+        if (text && !answers.includes(text)) answers.push(text);
+    });
+
+    return [...new Set(answers)];
+}
+
 async function saveCurrentAnswer() {
-    const code = getCurrentBookworkCode();
+    const code         = getCurrentBookworkCode();
     const questionText = getCurrentQuestionText();
-    const answers = extractCurrentAnswers();
+    const answers      = extractCurrentAnswers();
 
     if (!code || !questionText || answers.length === 0) return;
 
-    // Strip LaTeX delimiters from question text for comparison (like SparxSolver's p() helper)
     const normalise = str => str.replace(/\$.*?\$/g, '').replace(/ +/g, ' ').trim();
-
-    const store = await getBookworkStore();
-    const existing = Array.isArray(store[code]) ? store[code] : [];
-
-    // Replace any existing entry for this exact question, then prepend the new one
-    const filtered = existing.filter(entry => normalise(entry.id) !== normalise(questionText));
+    const store     = await getBookworkStore();
+    const existing  = Array.isArray(store[code]) ? store[code] : [];
+    const filtered  = existing.filter(entry => normalise(entry.id) !== normalise(questionText));
     filtered.unshift({ id: questionText, answers, date: Date.now() });
-
     store[code] = filtered;
     await setBookworkStore(store);
 }
 
-/**
- * Set up event listeners to trigger saving whenever the student interacts
- * with the question (mirrors SparxSolver's Ns() function).
- */
-function initAnswerSaving() {
-    const handler = () => saveCurrentAnswer();
-    document.addEventListener('pointerdown', handler, { capture: true });
-    document.addEventListener('keydown', handler, { capture: true });
+// ─── INTERACTION HANDLER ──────────────────────────────────────────────────────
+
+function onInteraction() {
+    saveCurrentAnswer(); // bookwork local store
+    savePending();       // overwrite pending with latest state
 }
 
-// Initialise answer saving when the content script loads
+function initAnswerSaving() {
+    document.addEventListener('pointerdown', onInteraction, { capture: true });
+    document.addEventListener('keydown',     onInteraction, { capture: true });
+
+    // 'input' fires on every keystroke so decimals like 61.9 are captured
+    // as the user finishes typing rather than snapshotting mid-number.
+    document.addEventListener('input', onInteraction, { capture: true });
+
+    // Write pending immediately on page load so there's always something stored
+    // even if the user opens the popup before interacting with the question.
+    savePending();
+}
+
 initAnswerSaving();
 
-// ─── AUTO-SOLVE FILL ─────────────────────────────────────────────────────────
+// ─── AUTO-SOLVE FILL ──────────────────────────────────────────────────────────
 
 async function performAutoSolve(answer) {
-    // Reveal hidden slots
     const slots = document.querySelectorAll('[class*="_CardContentEmpty_"]');
     for (let s of slots) { s.click(); await new Promise(r => setTimeout(r, 200)); }
 
-    // Click matching tiles
     const tiles = document.querySelectorAll('[class*="_Tile_"], [class*="_CardContent_"]');
     tiles.forEach(t => {
         const val = t.innerText + (t.querySelector('annotation')?.textContent || "");
         if (answer.includes(val.trim())) t.click();
     });
 
-    // Fill inputs
     const input = document.querySelector('input[data-ref="BIP"], input[type="text"]');
     if (input) {
-        const match = answer.match(/\d+/);
+        const match = answer.match(/-?[0-9]+(\.[0-9]+)?/);
         if (match) {
             input.value = match[0];
             input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -199,33 +237,60 @@ async function performAutoSolve(answer) {
     }
 }
 
-// ─── MESSAGE LISTENER ────────────────────────────────────────────────────────
+// ─── MESSAGE LISTENER ─────────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+
     if (request.action === 'extractAll') {
         sendResponse({
-            text: findAndExtractAll(),
-            images: Array.from(document.querySelectorAll('img'))
-                .map(i => i.src)
-                .filter(s => s && s !== LOGO_URL && s.includes('sparx-learning.com'))
+            text:    findAndExtractAll(),
+            imageId: getCurrentImageId(),
+            answer:  getCurrentAnswer(),
+            images:  Array.from(document.querySelectorAll('img'))
+                         .map(i => i.src)
+                         .filter(s => s && s !== LOGO_URL && s.includes('sparx-learning.com'))
         });
 
     } else if (request.action === 'autoSolve') {
         performAutoSolve(request.answer);
 
     } else if (request.action === 'getBookworkAnswers') {
-        // Popup asks for saved answers for a given bookwork code
         getBookworkStore().then(store => {
-            const code = request.code;
-            sendResponse({ answers: store[code] || [] });
+            sendResponse({ answers: store[request.code] || [] });
         });
-        return true; // async
+        return true;
 
     } else if (request.action === 'getAllBookwork') {
-        getBookworkStore().then(store => {
-            sendResponse({ store });
+        getBookworkStore().then(store => sendResponse({ store }));
+        return true;
+
+    } else if (request.action === 'SAVE_QUESTION') {
+        chrome.storage.local.get([PENDING_STORAGE_KEY], (result) => {
+            const pending = result[PENDING_STORAGE_KEY];
+
+            // Prefer the stored pending snapshot; fall back to live DOM
+            const question = pending?.question ?? getCurrentQuestionText();
+            const imageId  = pending?.imageId  ?? getCurrentImageId();
+            const answer   = pending?.answer   ?? getCurrentAnswer();
+
+            // ── Debug output ─────────────────────────────────────────────────
+            console.log('[SparxLess] ── Submitting to Unconfirmed ──────────────');
+            console.log('[SparxLess] Question :', question);
+            console.log('[SparxLess] Image ID :', imageId);
+            console.log('[SparxLess] Answer   :', answer);
+            console.log('[SparxLess] ─────────────────────────────────────────');
+
+            if (!question) {
+                sendResponse({ success: false, error: 'No question text found on page.' });
+                return;
+            }
+
+            chrome.runtime.sendMessage(
+                { action: 'POST_TO_SUPABASE', payload: { question, imageId, answer } },
+                result => sendResponse(result)
+            );
         });
-        return true; // async
+        return true;
     }
 
     return true;
