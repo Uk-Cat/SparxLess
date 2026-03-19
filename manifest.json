@@ -1,36 +1,36 @@
 {
   "manifest_version": 3,
-  "name": "Sparx Maths Helper",
+  "name": "SparxLess",
   "version": "1.2.0",
-  "description": "Automatically saves Sparx Maths questions to the Unconfirmed table on answer submission.",
+  "description": "An extension to help complete your Sparx maths homework.",
 
-  "permissions": [
-    "activeTab",
-    "scripting",
-    "tabs"
-  ],
+  "permissions": ["activeTab", "scripting", "storage", "tabs"],
 
   "host_permissions": [
     "https://*.sparxmaths.uk/*",
     "https://*.sparxmaths.com/*",
     "https://*.sparx-learning.com/*",
+    "https://maths.sparx-learning.com/*",
+    "https://generativelanguage.googleapis.com/*",
+    "https://openrouter.ai/*",
     "https://uxcwmzmktamtlyvwzsua.supabase.co/*"
   ],
 
-  "background": {
-    "service_worker": "background.js"
+  "action": {
+    "default_popup": "popup.html"
   },
 
-  "action": {
-    "default_popup": "popup.html",
-    "default_title": "Sparx Helper"
+  "background": {
+    "service_worker": "background.js"
   },
 
   "content_scripts": [
     {
       "matches": [
         "https://*.sparxmaths.uk/*",
-        "https://*.sparxmaths.com/*"
+        "https://*.sparxmaths.com/*",
+        "https://*.sparx-learning.com/*",
+        "https://maths.sparx-learning.com/*"
       ],
       "js": ["content.js"],
       "run_at": "document_idle"

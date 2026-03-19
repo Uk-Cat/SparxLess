@@ -6,7 +6,7 @@
 <body>
     <div class="app-container">
         <header>
-            <div class="logo">SparxLess</div>
+            <div class="logo">SparxLess <span>AI</span></div>
             <button id="toggle-settings" class="icon-btn">
                 <img src="Icon/SettingIcon.png" alt="Settings" id="settings-img">
             </button>
@@ -21,27 +21,38 @@
                     <option value="openrouter">OpenRouter (Free)</option>
                 </select>
             </div>
-
             <div class="input-group">
                 <label>Model ID</label>
-                <select id="model-select">
-                    </select>
+                <select id="model-select"></select>
             </div>
             <div class="input-group">
                 <label>API Key</label>
-                 <input type="password" id="api-key-input" placeholder="Paste your key here...">
+                <input type="password" id="api-key-input" placeholder="Paste your key here...">
             </div>
             <button id="save-settings" class="primary-btn">SAVE SETTINGS</button>
         </div>
 
         <main>
+            <!-- Original detected question card -->
             <div class="card preview-card">
                 <label>Detected Question</label>
                 <div id="text-preview">Scanning Sparx page...</div>
             </div>
 
+            <!-- NEW: Image ID card -->
+            <div class="card">
+                <label>Image ID</label>
+                <div id="image-id-display" style="font-size:11px;font-family:monospace;color:#4f46e5;word-break:break-all;">Scanning...</div>
+            </div>
+
+            <!-- Original solve button -->
             <button id="solve-btn" class="solve-btn">SOLVE PROBLEM</button>
 
+            <!-- NEW: Submit to database button -->
+            <button id="submit-btn" class="submit-btn">SUBMIT TO UNCONFIRMED</button>
+            <div id="submit-status"></div>
+
+            <!-- Original result card -->
             <div id="result-container" class="card result-card" style="display:none;">
                 <div class="result-header">
                     <div class="status-indicator"></div>

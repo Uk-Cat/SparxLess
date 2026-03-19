@@ -6,7 +6,7 @@
 const SUPABASE_URL      = "https://uxcwmzmktamtlyvwzsua.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV4Y3dtem1rdGFtdGx5dnd6c3VhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI0MDg4NTUsImV4cCI6MjA4Nzk4NDg1NX0.A3ws0EGQqBWbR9ufnkytxIaaZNMm4Oa12gbIkL6cl_g";
 
-const TABLE_NAME    = "UNconfirmed_Table";
+const TABLE_NAME    = "UNcomfirmed_Table";
 const REST_ENDPOINT = `${SUPABASE_URL}/rest/v1/${TABLE_NAME}`;
 
 // ── Supabase POST ─────────────────────────────────────────────

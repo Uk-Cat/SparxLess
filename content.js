@@ -1,13 +1,13 @@
 // ============================================================
 // content.js - Sparx Maths Auto-Submit to Supabase
-// Logs question + image ID the instant a question loads.
-// Posts to Supabase when the user submits their answer.
 // ============================================================
+
+console.log("[Sparx Ext] content.js loaded on:", location.href);
 
 // -- 1. React Fiber Helpers ----------------------------------
 
 function findReact(dom) {
-  for (const key in dom) {
+  for (var key in dom) {
     if (key.startsWith("__reactFiber$") || key.startsWith("__reactInternalInstance$")) {
       return dom[key];
     }
@@ -53,7 +53,110 @@ function findInTree(node, predicate, walkable, maxProperties) {
   return null;
 }
 
-// -- 2. Answer Extraction ------------------------------------
+// -- 2. DOM Text Extraction (handles KaTeX) ------------------
+
+/**
+ * Walks DOM nodes and extracts readable text.
+ * For KaTeX nodes: reads the LaTeX source from the <annotation> tag
+ * so we get "$y$" instead of garbled HTML.
+ * Skips katex-html and katex-mathml subtrees to avoid double-reading.
+ */
+function extractTextNodes(node) {
+  // KaTeX root: grab the raw LaTeX annotation
+  if (node.classList && node.classList.contains("katex")) {
+    var annotation = node.querySelector('annotation[encoding="application/x-tex"]');
+    return annotation ? " " + annotation.textContent + " " : (node.innerText || "");
+  }
+  // Skip the duplicate HTML/MathML renders inside katex
+  if (node.classList && (
+    node.classList.contains("katex-html") ||
+    node.classList.contains("katex-mathml")
+  )) {
+    return "";
+  }
+  // Plain text node
+  if (node.nodeType === Node.TEXT_NODE) {
+    return node.textContent;
+  }
+  // Recurse into children
+  var text = "";
+  for (var i = 0; i < node.childNodes.length; i++) {
+    text += extractTextNodes(node.childNodes[i]);
+  }
+  return text;
+}
+
+/**
+ * Reads question text directly from the DOM.
+ * Targets _TextElement_ spans inside the question area.
+ */
+function extractQuestionTextFromDOM() {
+  // Collect all _TextElement_ nodes inside the question wrapper
+  var wrapper = document.querySelector('[class*="_QuestionWrapper_"]');
+  if (!wrapper) return "";
+
+  var textElements = wrapper.querySelectorAll('[class*="_TextElement_"]');
+  if (!textElements.length) return "";
+
+  var parts = [];
+  textElements.forEach(function(el) {
+    var text = extractTextNodes(el).replace(/\s+/g, " ").trim();
+    if (text && parts.indexOf(text) === -1) {
+      parts.push(text);
+    }
+  });
+
+  return parts.join(" ").trim();
+}
+
+// -- 3. Image ID Extraction ----------------------------------
+
+/**
+ * Reads image UUID from the React fiber's figure-ref node.
+ * e.g. figure.image = "2734b91f-fadc-4520-a6ae-fc16381e241a"
+ * Falls back to scraping the CDN <img> src from the DOM.
+ */
+function extractImageId(layout) {
+  // Try fiber first (most reliable)
+  if (layout) {
+    var figureRef = findInTree(
+      layout,
+      function(n) { return n && n.element === "figure-ref" && n.figure && n.figure.image; },
+      ["content"]
+    );
+    if (figureRef) return figureRef.figure.image;
+  }
+
+  // DOM fallback: find <img> inside _ImageContainer_
+  var container = document.querySelector('[class*="_ImageContainer_"]');
+  if (container) {
+    var img = container.querySelector("img");
+    if (img && img.src) {
+      var parts = img.src.split("/");
+      var last = parts[parts.length - 1];
+      if (last && last.length > 8) return last;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Extracts the full image URL from the DOM.
+ * Returns the <img> src attribute if available.
+ */
+function extractImageUrl() {
+  var container = document.querySelector('[class*="_ImageContainer_"]');
+  if (container) {
+    var img = container.querySelector("img");
+    if (img && img.src) {
+      return img.src;
+    }
+  }
+  return null;
+}
+
+// -- 4. Answer Extraction ------------------------------------
 
 function extractAnswers(inputProps) {
   var answers = [];
@@ -84,63 +187,56 @@ function extractAnswers(inputProps) {
   return answers;
 }
 
-// -- 3. Main Extraction --------------------------------------
+// -- 5. Main Extraction --------------------------------------
 
 function extractQuestionData() {
   var questionWrapper = document.querySelector('[class*="_QuestionWrapper_"]');
   var questionInfo    = document.querySelector('[class*="_QuestionInfo_"]');
 
   if (!questionWrapper || !questionInfo) {
-    return { error: "DOM elements not found - are you on a Sparx question page?" };
+    var msg = "DOM elements not found";
+    if (!questionWrapper) msg += " (QuestionWrapper)";
+    if (!questionInfo) msg += " (QuestionInfo)";
+    msg += " - are you on a Sparx question page?";
+    return { error: msg };
   }
 
+  // Question text: always read from DOM so KaTeX renders correctly
+  var questionText = extractQuestionTextFromDOM();
+
+  // For image ID and answers we still use the fiber
   var questionFiber = findReact(questionWrapper);
   var infoFiber     = findReact(questionInfo);
 
-  if (!questionFiber || !infoFiber) {
-    return { error: "React fiber not found - page may still be loading." };
+  var imageId      = null;
+  var imageUrl     = null;
+  var bookworkCode = null;
+  var answers      = [];
+
+  if (questionFiber) {
+    try {
+      var inputSection = findInReactTree(
+        questionFiber.memoizedProps.children,
+        function(n) { return n && n.layout && n.input; }
+      );
+
+      if (inputSection) {
+        imageId = extractImageId(inputSection.layout);
+        answers = extractAnswers(inputSection.input);
+      }
+    } catch (e) {
+      console.warn("[Sparx Ext] Fiber extraction error:", e.message);
+    }
   }
 
-  try {
-    // Find the section that has both layout and input
-    var inputSection = findInReactTree(
-      questionFiber.memoizedProps.children,
-      function(n) { return n && n.layout && n.input; }
-    );
+  // Image ID DOM fallback if fiber gave nothing
+  if (!imageId) imageId = extractImageId(null);
 
-    if (!inputSection) {
-      return { error: "Could not find inputSection in React tree." };
-    }
+  // Extract image URL (always from DOM)
+  imageUrl = extractImageUrl();
 
-    var layout = inputSection.layout;
-
-    // Extract question text
-    // layout.content -> find group with type ["question-text"] -> find element:"text"
-    var questionTextGroup = findInTree(
-      layout,
-      function(n) { return n && Array.isArray(n.type) && n.type.indexOf("question-text") !== -1; },
-      ["content"]
-    );
-
-    var questionTextNode = findInTree(
-      questionTextGroup,
-      function(n) { return n && n.element === "text" && typeof n.text === "string"; },
-      ["content"]
-    );
-
-    var questionText = questionTextNode ? questionTextNode.text.trim() : "";
-
-    // Extract image ID from fiber (figure-ref node has figure.image UUID)
-    var figureRef = findInTree(
-      layout,
-      function(n) { return n && n.element === "figure-ref" && n.figure && n.figure.image; },
-      ["content"]
-    );
-
-    var imageId = figureRef ? figureRef.figure.image : null;
-
-    // Extract bookwork code - walk fiber parents first
-    var bookworkCode = null;
+  // Bookwork code: walk fiber parents, then fall back to DOM text pattern
+  if (infoFiber) {
     var fiberNode = infoFiber;
     for (var i = 0; i < 20; i++) {
       if (fiberNode && fiberNode.memoizedProps && fiberNode.memoizedProps.bookworkCode) {
@@ -149,29 +245,28 @@ function extractQuestionData() {
       }
       fiberNode = fiberNode ? fiberNode.return : null;
     }
-    // Fallback: read text from the DOM and match pattern like "B4"
-    if (!bookworkCode) {
-      var allText = questionInfo.innerText || "";
-      var match = allText.match(/\b([A-Z]\d+)\b/);
-      if (match) bookworkCode = match[1];
-    }
-    if (!bookworkCode) bookworkCode = "unknown-" + Date.now();
-
-    var answers = extractAnswers(inputSection.input);
-
-    return {
-      question:     questionText,
-      bookworkCode: bookworkCode,
-      imageId:      imageId,
-      answers:      answers,
-    };
-
-  } catch (err) {
-    return { error: "Extraction error: " + err.message };
   }
+  if (!bookworkCode) {
+    var allText = questionInfo.innerText || "";
+    var match = allText.match(/\b([A-Z]\d+)\b/);
+    if (match) bookworkCode = match[1];
+  }
+  if (!bookworkCode) bookworkCode = "unknown-" + Date.now();
+
+  if (!questionText) {
+    return { error: "Question text was empty - page may still be rendering." };
+  }
+
+  return {
+    question:     questionText,
+    bookworkCode: bookworkCode,
+    imageId:      imageId,
+    imageUrl:     imageUrl,
+    answers:      answers,
+  };
 }
 
-// -- 4. Instant Logger (fires on question load) --------------
+// -- 6. Instant Logger (fires on question load) --------------
 
 var lastLoggedQuestion    = null;
 var lastSubmittedQuestion = null;
@@ -181,10 +276,10 @@ var debounceTimer         = null;
 function tryLogQuestion() {
   var data = extractQuestionData();
   if (!data || data.error || !data.question) return;
-  if (data.question === lastLoggedQuestion) return; // already logged this one
+  if (data.question === lastLoggedQuestion) return;
 
   lastLoggedQuestion    = data.question;
-  lastSubmittedQuestion = null; // reset submit dedupe for new question
+  lastSubmittedQuestion = null;
 
   console.log("[Sparx Ext] ======================================");
   console.log("[Sparx Ext] NEW QUESTION DETECTED");
@@ -192,10 +287,16 @@ function tryLogQuestion() {
   console.log("[Sparx Ext] Image ID :", data.imageId || "(no image on this question)");
   console.log("[Sparx Ext] Bookwork :", data.bookworkCode);
   console.log("[Sparx Ext] ======================================");
+
+  // Send data to popup if it's open
+  chrome.runtime.sendMessage({ action: 'QUESTION_DATA_DETECTED', payload: data }, function(response) {
+    // Silently fail if popup isn't open - that's normal
+    if (chrome.runtime.lastError) {
+      // Popup not open, ignore
+    }
+  });
 }
 
-// Watch the whole DOM for changes - when Sparx renders a new question,
-// wait 400ms for React to finish, then extract and log.
 new MutationObserver(function() {
   if (location.href !== lastUrl) {
     lastUrl = location.href;
@@ -204,25 +305,23 @@ new MutationObserver(function() {
   debounceTimer = setTimeout(tryLogQuestion, 400);
 }).observe(document.body, { childList: true, subtree: true });
 
-// Also try immediately in case question is already on screen when script loads
+// Try immediately in case question is already rendered
 setTimeout(tryLogQuestion, 800);
 
-// -- 5. Auto-Submit on Answer Submission ---------------------
+// -- 7. Auto-Submit on Answer Submission ---------------------
 
 function autoSubmit() {
   var data = extractQuestionData();
 
   if (!data || data.error) {
-    console.warn("[Sparx Ext] Submit skipped - extraction error:", data ? data.error : "null");
+    console.warn("[Sparx Ext] Submit skipped:", data ? data.error : "null data");
     return;
   }
   if (!data.question) {
     console.warn("[Sparx Ext] Submit skipped - question text empty.");
     return;
   }
-  if (data.question === lastSubmittedQuestion) {
-    return; // already submitted this question
-  }
+  if (data.question === lastSubmittedQuestion) return;
   lastSubmittedQuestion = data.question;
 
   console.log("[Sparx Ext] Submitting to Supabase...");
@@ -236,7 +335,7 @@ function autoSubmit() {
   });
 }
 
-// -- 6. Submit Button Detection ------------------------------
+// -- 8. Submit Button Detection ------------------------------
 
 function isSubmitButton(el) {
   var node = el;
@@ -265,7 +364,7 @@ document.addEventListener("click", function(e) {
   setTimeout(autoSubmit, 300);
 }, true);
 
-// -- 7. Manual Trigger (popup) -------------------------------
+// -- 9. Manual Trigger (popup) -------------------------------
 
 chrome.runtime.onMessage.addListener(function(message, _sender, sendResponse) {
   if (message.action !== "SAVE_QUESTION") return;
@@ -285,5 +384,18 @@ chrome.runtime.onMessage.addListener(function(message, _sender, sendResponse) {
     { action: "POST_TO_SUPABASE", payload: data },
     function(res) { sendResponse(res); }
   );
+  return true;
+});
+
+// -- 10. GET_QUESTION_DATA handler (for popup display) -------
+
+chrome.runtime.onMessage.addListener(function(message, _sender, sendResponse) {
+  if (message.action !== "GET_QUESTION_DATA") return;
+  var data = extractQuestionData();
+  if (data && data.error) {
+    sendResponse({ error: data.error });
+  } else {
+    sendResponse(data);
+  }
   return true;
 });
