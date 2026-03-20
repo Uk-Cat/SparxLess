@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SparxLess",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "An extension to help complete your sparx math homework. Answers are automatically saved for bookwork checks and can be submitted to a shared database.",
   "permissions": ["activeTab", "scripting", "storage"],
   "host_permissions": [
