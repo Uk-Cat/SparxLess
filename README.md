@@ -5,16 +5,7 @@ V1.2.0
 1. Project Structure
 Ensure your folder looks like this before proceeding:
 
-Plaintext
-
-  /SparxLess
-    ├── Icon/
-    │    └── SettingIcon.png
-    ├── manifest.json
-    ├── popup.html
-    ├── popup.css
-    ├── popup.js
-    └── content.js
+tree -L 2 .
 2. How to Install the extension
 
 Open your browser and click on the three dots in the top right corner
