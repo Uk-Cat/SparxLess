@@ -35,6 +35,22 @@ header {
     border-radius: 4px;
 }
 
+.bookwork-icon-btn {
+    font-size: 11px;
+    font-weight: bold;
+    color: var(--primary);
+    border: 1px solid var(--primary);
+    border-radius: 4px;
+    padding: 4px 8px;
+    background: none;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.bookwork-icon-btn:hover {
+    background: #ede9fe;
+}
+
 #settings-img {
     width: 22px;
     height: 22px;
@@ -50,8 +66,56 @@ header {
     box-shadow: 0 1px 2px rgba(0,0,0,0.05);
 }
 
-label { font-size: 10px; font-weight: bold; color: #6b7280; text-transform: uppercase; margin-bottom: 4px; display: block; }
+label {
+    font-size: 10px;
+    font-weight: bold;
+    color: #6b7280;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+    display: block;
+}
 
+/* ── Card header row (label + copy btn) — used on question and image cards ── */
+.card-header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+/* ── Image preview card ── */
+.image-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+#image-preview {
+    width: 100%;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    display: block;
+    background: #f9fafb;
+}
+
+.copy-btn {
+    font-size: 10px;
+    font-weight: bold;
+    color: var(--primary);
+    background: #ede9fe;
+    border: 1px solid #c4b5fd;
+    border-radius: 4px;
+    padding: 3px 8px;
+    cursor: pointer;
+    transition: background 0.15s;
+    white-space: nowrap;
+}
+
+.copy-btn:hover  { background: #ddd6fe; }
+.copy-btn.copied { background: #d1fae5; color: #059669; border-color: #6ee7b7; }
+
+/* ── Buttons ── */
 .solve-btn {
     width: 100%;
     background: var(--primary);
@@ -64,32 +128,19 @@ label { font-size: 10px; font-weight: bold; color: #6b7280; text-transform: uppe
     margin-bottom: 10px;
 }
 
-.status-indicator {
-    width: 8px;
-    height: 8px;
-    background: #10b981;
-    border-radius: 50%;
-    display: inline-block;
-    margin-right: 6px;
-}
-
-.drawer {
-    display: none;
-    background: #fff;
-    border: 1px solid var(--primary);
-    padding: 12px;
-    border-radius: 8px;
-    margin-bottom: 15px;
-}
-
-input, select {
+.submit-btn {
     width: 100%;
-    padding: 8px;
-    margin-top: 4px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    box-sizing: border-box;
+    background: #10b981;
+    color: white;
+    border: none;
+    padding: 12px;
+    border-radius: 6px;
+    font-weight: bold;
+    cursor: pointer;
+    margin-bottom: 10px;
 }
+
+.submit-btn:disabled { background: #6ee7b7; cursor: not-allowed; }
 
 .primary-btn {
     width: 100%;
@@ -100,6 +151,60 @@ input, select {
     border: none;
     border-radius: 4px;
     cursor: pointer;
+}
+
+/* ── Status ── */
+.status-indicator {
+    width: 8px;
+    height: 8px;
+    background: #10b981;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 6px;
+}
+
+#submit-status {
+    font-size: 11px;
+    text-align: center;
+    min-height: 14px;
+    margin-bottom: 6px;
+}
+
+/* ── Drawers ── */
+.drawer {
+    display: none;
+    background: #fff;
+    border: 1px solid var(--primary);
+    padding: 12px;
+    border-radius: 8px;
+    margin-bottom: 15px;
+}
+
+.drawer-header {
+    font-size: 10px;
+    font-weight: bold;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 10px;
+}
+
+.input-group { margin-bottom: 8px; }
+
+input, select {
+    width: 100%;
+    padding: 8px;
+    margin-top: 4px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    box-sizing: border-box;
+}
+
+/* ── Result card ── */
+.result-header {
+    display: flex;
+    align-items: center;
+    margin-bottom: 6px;
 }
 
 #raw-ai-response {
@@ -122,25 +227,4 @@ input, select {
     text-align: center;
     cursor: pointer;
     margin-top: 10px;
-}
-
-.submit-btn {
-    width: 100%;
-    background: #10b981;
-    color: white;
-    border: none;
-    padding: 12px;
-    border-radius: 6px;
-    font-weight: bold;
-    cursor: pointer;
-    margin-bottom: 10px;
-}
-
-.submit-btn:disabled { background: #6ee7b7; cursor: not-allowed; }
-
-#submit-status {
-    font-size: 11px;
-    text-align: center;
-    min-height: 14px;
-    margin-bottom: 6px;
 }

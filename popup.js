@@ -11,13 +11,111 @@ document.addEventListener('DOMContentLoaded', async () => {
     const rawContainer    = document.getElementById('raw-ai-response');
     const toggleRaw       = document.getElementById('toggle-raw');
     const previewBox      = document.getElementById('text-preview');
-    const imageIdDisplay  = document.getElementById('image-id-display');
     const apiKeyInput     = document.getElementById('api-key-input');
     const providerSelect  = document.getElementById('provider-select');
     const modelSelect     = document.getElementById('model-select');
     const bookworkPanel   = document.getElementById('bookwork-panel');
     const toggleBookwork  = document.getElementById('toggle-bookwork');
     const bookworkContent = document.getElementById('bookwork-content');
+    // Image preview elements (replaces old imageIdDisplay text)
+    const imageCard       = document.getElementById('image-card');
+    const imagePreview    = document.getElementById('image-preview');
+    const copyImageBtn    = document.getElementById('copy-image-btn');
+
+    // Tracks the current image URL so the copy button always has it
+    let currentImageUrl = null;
+
+    // ── Shared copy feedback helper ────────────────────────────────────────────
+    function showCopied(btn, originalLabel) {
+        btn.textContent = '✓ Copied!';
+        btn.classList.add('copied');
+        setTimeout(() => {
+            btn.textContent = originalLabel;
+            btn.classList.remove('copied');
+        }, 2000);
+    }
+
+    // ── Question copy button ───────────────────────────────────────────────────
+    const copyQuestionBtn = document.getElementById('copy-question-btn');
+    copyQuestionBtn.addEventListener('click', () => {
+        const text = previewBox.innerText?.trim();
+        if (!text) return;
+        navigator.clipboard.writeText(text)
+            .then(() => showCopied(copyQuestionBtn, 'Copy'))
+            .catch(() => {
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+                showCopied(copyQuestionBtn, 'Copy');
+            });
+    });
+
+    // ── Image preview helpers ──────────────────────────────────────────────────
+    function showImagePreview(imageUrl) {
+        if (!imageUrl) {
+            imageCard.style.display = 'none';
+            currentImageUrl = null;
+            return;
+        }
+        currentImageUrl = imageUrl;
+        imagePreview.src = imageUrl;
+        imageCard.style.display = 'block';
+    }
+
+    // Copy Image button — fetches the image, converts to PNG blob, and writes
+    // it to the clipboard as an actual image so it can be pasted directly
+    // into ChatGPT, Google, etc. (not just a URL).
+    copyImageBtn.addEventListener('click', async () => {
+        if (!currentImageUrl) return;
+        copyImageBtn.textContent = 'Copying...';
+        copyImageBtn.disabled = true;
+        try {
+            const response = await fetch(currentImageUrl);
+            const blob     = await response.blob();
+
+            // Clipboard API only accepts image/png — convert if needed
+            let pngBlob = blob;
+            if (blob.type !== 'image/png') {
+                pngBlob = await convertToPng(blob);
+            }
+
+            await navigator.clipboard.write([
+                new ClipboardItem({ 'image/png': pngBlob })
+            ]);
+            showCopied(copyImageBtn, 'Copy Image');
+        } catch (err) {
+            console.error('[SparxLess] Image copy failed:', err);
+            copyImageBtn.textContent = '✗ Failed';
+            copyImageBtn.style.color = '#ef4444';
+            setTimeout(() => {
+                copyImageBtn.textContent = 'Copy Image';
+                copyImageBtn.style.color = '';
+            }, 2000);
+        } finally {
+            copyImageBtn.disabled = false;
+        }
+    });
+
+    // Draws the image onto a canvas and returns a PNG blob
+    function convertToPng(blob) {
+        return new Promise((resolve, reject) => {
+            const url = URL.createObjectURL(blob);
+            const img = new Image();
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                canvas.width  = img.naturalWidth;
+                canvas.height = img.naturalHeight;
+                canvas.getContext('2d').drawImage(img, 0, 0);
+                URL.revokeObjectURL(url);
+                canvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob failed')), 'image/png');
+            };
+            img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Image load failed')); };
+            img.src = url;
+        });
+    }
 
     // ── Model configurations ───────────────────────────────────────────────────
     const modelOptions = {
@@ -45,7 +143,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // ── UI: Settings drawer ────────────────────────────────────────────────────
     toggleSettings.onclick = () => {
-        settingsPanel.style.display = settingsPanel.style.display === 'block' ? 'none' : 'block';
+        const isOpen = settingsPanel.style.display === 'block';
+        settingsPanel.style.display = isOpen ? 'none' : 'block';
         if (bookworkPanel) bookworkPanel.style.display = 'none';
     };
 
@@ -57,13 +156,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
 
     // ── UI: Bookwork history panel toggle ──────────────────────────────────────
-    if (toggleBookwork) {
+    if (toggleBookwork && bookworkPanel) {
         toggleBookwork.onclick = () => {
-            const isHidden = !bookworkPanel || bookworkPanel.style.display === 'none';
-            if (bookworkPanel) {
-                bookworkPanel.style.display = isHidden ? 'block' : 'none';
-                settingsPanel.style.display = 'none';
-            }
+            const isHidden = bookworkPanel.style.display === 'none' || bookworkPanel.style.display === '';
+            bookworkPanel.style.display = isHidden ? 'block' : 'none';
+            settingsPanel.style.display = 'none';
             if (isHidden) renderBookworkHistory();
         };
     }
@@ -101,40 +198,79 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
 
     // ── Initial page scan ──────────────────────────────────────────────────────
+    // The display cache is locked by content.js on the first valid extraction
+    // and only cleared when the URL changes (next question). So:
+    //   - If cache exists → always use it (we may be mid-answer, live DOM is dirty)
+    //   - If cache is empty → run a live scan to populate it for the first time
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tab?.id) {
-        chrome.tabs.sendMessage(tab.id, { action: 'extractAll' }, (data) => {
-            if (data?.text)    previewBox.innerText = data.text;
-            // Show the detected image ID in its card
-            if (imageIdDisplay) {
-                imageIdDisplay.innerText = data?.imageId ?? 'None detected';
-            }
-        });
-    }
+
+    chrome.storage.local.get(['SparxLessDisplay'], (stored) => {
+        const cached = stored['SparxLessDisplay'];
+
+        if (cached?.text || cached?.imageUrl) {
+            // Cache is locked — render it and do NOT overwrite with live DOM values
+            if (cached.text)     previewBox.innerText = cached.text;
+            if (cached.imageUrl) showImagePreview(cached.imageUrl);
+        } else if (tab?.id) {
+            // Cache is empty (new question, fresh page) — live scan to populate
+            chrome.tabs.sendMessage(tab.id, { action: 'extractAll' }, (data) => {
+                if (chrome.runtime.lastError) return;
+                if (data?.text) previewBox.innerText = data.text;
+                showImagePreview(data?.images?.[0] ?? null);
+            });
+        }
+    });
 
     // ── Submit to Unconfirmed (Supabase) ───────────────────────────────────────
-    // Uses the same getCurrentQuestionText() + getCurrentImageId() already running
-    // in content.js — just sends SAVE_QUESTION which background.js routes to Supabase.
     if (submitBtn) {
         submitBtn.onclick = async () => {
+            if (!tab?.id) {
+                if (submitStatus) { submitStatus.style.color = '#ef4444'; submitStatus.innerText = '✗ No active Sparx tab found.'; }
+                return;
+            }
+
             submitBtn.disabled = true;
             submitBtn.innerText = "SUBMITTING...";
-            if (submitStatus) { submitStatus.style.color = '#6b7280'; submitStatus.innerText = 'Sending to database...'; }
+            if (submitStatus) { submitStatus.style.color = '#6b7280'; submitStatus.innerText = 'Reading page...'; }
 
-            chrome.runtime.sendMessage({ action: 'SAVE_QUESTION' }, (result) => {
-                submitBtn.disabled = false;
-                submitBtn.innerText = "SUBMIT TO UNCONFIRMED";
+            // question + imageId come from the locked display cache — never the live DOM.
+            // answer + studentName come from the pending snapshot (last interaction).
+            chrome.storage.local.get(['SparxLessDisplay', 'SparxLessPending'], (stored) => {
+                const display = stored['SparxLessDisplay'];
+                const pending = stored['SparxLessPending'];
 
-                if (result?.success) {
-                    if (submitStatus) { submitStatus.style.color = '#10b981'; submitStatus.innerText = '✓ Submitted successfully!'; }
-                } else {
-                    const msg = result?.error || 'Unknown error';
-                    if (submitStatus) { submitStatus.style.color = '#ef4444'; submitStatus.innerText = `✗ Error: ${msg}`; }
-                    console.error('[SparxLess] Submit failed:', msg);
+                const question    = display?.text        || null;
+                // Extract UUID from the stored image URL — don't send the full URL as the ID
+                const imageId     = extractImageId(display?.imageUrl) || null;
+                const answer      = pending?.answer      || null;
+                const studentName = pending?.studentName || null;
+
+                if (!question) {
+                    submitBtn.disabled = false;
+                    submitBtn.innerText = "SUBMIT TO UNCONFIRMED";
+                    if (submitStatus) { submitStatus.style.color = '#ef4444'; submitStatus.innerText = '✗ No question detected. Open the extension on a question page first.'; }
+                    return;
                 }
 
-                // Clear status after 4 seconds
-                setTimeout(() => { if (submitStatus) submitStatus.innerText = ''; }, 4000);
+                if (submitStatus) { submitStatus.style.color = '#6b7280'; submitStatus.innerText = 'Sending to database...'; }
+
+                chrome.runtime.sendMessage(
+                    { action: 'POST_TO_SUPABASE', payload: { question, imageId, answer, studentName } },
+                    (result) => {
+                        submitBtn.disabled = false;
+                        submitBtn.innerText = "SUBMIT TO UNCONFIRMED";
+
+                        if (result?.success) {
+                            if (submitStatus) { submitStatus.style.color = '#10b981'; submitStatus.innerText = '✓ Submitted successfully!'; }
+                        } else {
+                            const msg = result?.error || 'Unknown error';
+                            if (submitStatus) { submitStatus.style.color = '#ef4444'; submitStatus.innerText = `✗ Error: ${msg}`; }
+                            console.error('[SparxLess] Submit failed:', msg);
+                        }
+
+                        setTimeout(() => { if (submitStatus) submitStatus.innerText = ''; }, 4000);
+                    }
+                );
             });
         };
     }
@@ -197,6 +333,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // ── Core solver ────────────────────────────────────────────────────────────
     solveBtn.onclick = async () => {
+        if (!tab?.id) {
+            alert("Could not detect the active tab. Please reopen the extension.");
+            return;
+        }
+
         chrome.storage.sync.get(['apiKey', 'provider', 'selectedModel'], async (config) => {
             if (!config.apiKey) return alert("Please set your API Key in Settings!");
 
@@ -231,9 +372,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const json     = await response.json();
                 if (json.error) throw new Error(json.error.message || "API Error");
 
-                const rawText    = config.provider === 'openrouter' ? json.choices[0].message.content : json.candidates[0].content.parts[0].text;
+                const rawText     = config.provider === 'openrouter'
+                    ? json.choices[0].message.content
+                    : json.candidates[0].content.parts[0].text;
                 const cleanAnswer = extractAnswer(rawText);
-                aiRes.innerHTML  = `<strong>${cleanAnswer}</strong>`;
+                aiRes.innerHTML   = `<strong>${cleanAnswer}</strong>`;
                 rawContainer.innerText = rawText;
 
                 chrome.tabs.sendMessage(tab.id, { action: 'autoSolve', answer: cleanAnswer });
@@ -249,6 +392,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
+
+function extractImageId(url) {
+    if (!url) return null;
+    const match = url.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+    return match ? match[0] : null;
+}
 
 function extractAnswer(text) {
     const boxedMatch = text.match(/\\boxed\{((?:[^{}]|\{[^{}]*\})*)\}/);

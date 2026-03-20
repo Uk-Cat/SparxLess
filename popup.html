@@ -6,13 +6,14 @@
 <body>
     <div class="app-container">
         <header>
-            <button id="toggle-bookwork" class="bookwork-icon-btn" title="Saved bookwork answers">Bookwork</button>
+            <button id="toggle-bookwork" class="icon-btn bookwork-icon-btn" title="Saved bookwork answers">📖 Bookwork</button>
             <div class="logo">SparxLess <span>AI</span></div>
             <button id="toggle-settings" class="icon-btn">
                 <img src="Icon/SettingIcon.png" alt="Settings" id="settings-img">
             </button>
         </header>
 
+        <!-- Settings drawer -->
         <div id="settings-panel" class="drawer">
             <div class="drawer-header">CONFIGURATION</div>
             <div class="input-group">
@@ -30,30 +31,44 @@
                 <label>API Key</label>
                 <input type="password" id="api-key-input" placeholder="Paste your key here...">
             </div>
-            <button id="save-settings" class="primary-btn">SAVE SETTINGS</button>
+            <button id="save-settings" class="primary-btn">APPLY CHANGES</button>
+        </div>
+
+        <!-- Bookwork history panel -->
+        <div id="bookwork-panel" class="drawer">
+            <div class="drawer-header">📖 SAVED BOOKWORK ANSWERS</div>
+            <div id="bookwork-content">
+                <em style="font-size:11px;color:#6b7280;">Loading...</em>
+            </div>
         </div>
 
         <main>
-            <!-- Original detected question card -->
+            <!-- Detected question card -->
             <div class="card preview-card">
-                <label>Detected Question</label>
+                <div class="card-header-row">
+                    <label style="margin:0;">Detected Question</label>
+                    <button id="copy-question-btn" class="copy-btn">Copy</button>
+                </div>
                 <div id="text-preview">Scanning Sparx page...</div>
             </div>
 
-            <!-- NEW: Image ID card -->
-            <div class="card">
-                <label>Image ID</label>
-                <div id="image-id-display" style="font-size:11px;font-family:monospace;color:#4f46e5;word-break:break-all;">Scanning...</div>
+            <!-- Image preview card — hidden until an image is found -->
+            <div class="card" id="image-card" style="display:none;">
+                <div class="image-card-header">
+                    <label style="margin:0;">Question Image</label>
+                    <button id="copy-image-btn" class="copy-btn">Copy Image</button>
+                </div>
+                <img id="image-preview" src="" alt="Question image" />
             </div>
 
-            <!-- Original solve button -->
+            <!-- Solve button -->
             <button id="solve-btn" class="solve-btn">SOLVE PROBLEM</button>
 
-            <!-- NEW: Submit to database button -->
+            <!-- Submit to database button -->
             <button id="submit-btn" class="submit-btn">SUBMIT TO UNCONFIRMED</button>
             <div id="submit-status"></div>
 
-            <!-- Original result card -->
+            <!-- Result card -->
             <div id="result-container" class="card result-card" style="display:none;">
                 <div class="result-header">
                     <div class="status-indicator"></div>

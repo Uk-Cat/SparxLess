@@ -13,18 +13,20 @@ const REST_ENDPOINT = `${SUPABASE_URL}/rest/v1/${TABLE_NAME}`;
 
 /**
  * Column mapping:
- *   "User"       ← "LocalUser"
+ *   "User"       ← studentName from the page (e.g. "Anthony Leng"), falls back to "Unknown"
  *   "Question"   ← data.question   (extracted question text)
  *   "Image"      ← data.imageId    (UUID from figure image, or null)
  *   "Answer"     ← data.answer     (student's entered answer, or null)
  *   "Confirmed?" ← false
  */
 async function postToSupabase(data) {
+    // FIX: Use the real student name extracted from the page.
+    // Previously hardcoded to "LocalUser" — now uses data.studentName if available.
     const row = {
-        "User":       "LocalUser",
+        "User":       data.studentName ?? "Unknown",
         "Question":   data.question,
-        "Image":      data.imageId ?? null,
-        "Answer":     data.answer  ?? null,
+        "Image":      data.imageId    ?? null,
+        "Answer":     data.answer     ?? null,
         "Confirmed?": false,
     };
 
@@ -61,13 +63,11 @@ async function postToSupabase(data) {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
-    // Content script sends extracted payload → POST to Supabase
     if (message.action === "POST_TO_SUPABASE") {
         postToSupabase(message.payload).then(sendResponse);
         return true;
     }
 
-    // Popup requests a save → ask active tab's content script to extract first
     if (message.action === "SAVE_QUESTION") {
         chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
             const tabId = tabs[0]?.id;
