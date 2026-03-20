@@ -5,7 +5,21 @@ V1.2.0
 1. Project Structure
 Ensure your folder looks like this before proceeding:
 
-tree -L 2 .
+```
+SparxLess/
+├── .gitattributes
+├── Icon/
+│   └── SettingIcon.png
+├── README.md
+├── README.txt
+├── background.js
+├── content.js
+├── manifest.json
+├── popup.css
+├── popup.html
+└── popup.js
+```
+
 2. How to Install the extension
 
 Open your browser and click on the three dots in the top right corner
