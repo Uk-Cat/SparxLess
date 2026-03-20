@@ -521,7 +521,7 @@ function autoSubmitCorrectAnswer() {
         if (question === lastAutoSubmitKey) return;
         lastAutoSubmitKey = question;
 
-        console.log('[SparxLess] ✓ Correct detected — auto-submitting...');
+        console.log('[SparxLess] Correct detected — auto-submitting...');
         console.log('[SparxLess] Student  :', studentName);
         console.log('[SparxLess] Question :', question);
         console.log('[SparxLess] Image ID :', imageId);

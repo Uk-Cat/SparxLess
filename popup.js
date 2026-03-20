@@ -27,7 +27,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // ── Shared copy feedback helper ────────────────────────────────────────────
     function showCopied(btn, originalLabel) {
-        btn.textContent = '✓ Copied!';
+        btn.textContent = 'Copied!';
         btn.classList.add('copied');
         setTimeout(() => {
             btn.textContent = originalLabel;
@@ -88,7 +88,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             showCopied(copyImageBtn, 'Copy Image');
         } catch (err) {
             console.error('[SparxLess] Image copy failed:', err);
-            copyImageBtn.textContent = '✗ Failed';
+            copyImageBtn.textContent = 'Failed';
             copyImageBtn.style.color = '#ef4444';
             setTimeout(() => {
                 copyImageBtn.textContent = 'Copy Image';
@@ -225,7 +225,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (submitBtn) {
         submitBtn.onclick = async () => {
             if (!tab?.id) {
-                if (submitStatus) { submitStatus.style.color = '#ef4444'; submitStatus.innerText = '✗ No active Sparx tab found.'; }
+                if (submitStatus) { submitStatus.style.color = '#ef4444'; submitStatus.innerText = 'No active Sparx tab found.'; }
                 return;
             }
 
@@ -248,7 +248,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (!question) {
                     submitBtn.disabled = false;
                     submitBtn.innerText = "SUBMIT TO UNCONFIRMED";
-                    if (submitStatus) { submitStatus.style.color = '#ef4444'; submitStatus.innerText = '✗ No question detected. Open the extension on a question page first.'; }
+                    if (submitStatus) { submitStatus.style.color = '#ef4444'; submitStatus.innerText = 'No question detected. Open the extension on a question page first.'; }
                     return;
                 }
 
@@ -261,10 +261,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                         submitBtn.innerText = "SUBMIT TO UNCONFIRMED";
 
                         if (result?.success) {
-                            if (submitStatus) { submitStatus.style.color = '#10b981'; submitStatus.innerText = '✓ Submitted successfully!'; }
+                            if (submitStatus) { submitStatus.style.color = '#10b981'; submitStatus.innerText = 'Submitted successfully!'; }
                         } else {
                             const msg = result?.error || 'Unknown error';
-                            if (submitStatus) { submitStatus.style.color = '#ef4444'; submitStatus.innerText = `✗ Error: ${msg}`; }
+                            if (submitStatus) { submitStatus.style.color = '#ef4444'; submitStatus.innerText = `Error: ${msg}`; }
                             console.error('[SparxLess] Submit failed:', msg);
                         }
 
