@@ -9,7 +9,11 @@ Ensure your folder looks like this before proceeding:
 SparxLess/
 ├── .gitattributes
 ├── Icon/
-│   └── SettingIcon.png
+│   ├── SettingIcon.png
+│   ├── Sparx_Math_Logo_128.png
+│   ├── Sparx_Math_Logo_16.png
+│   ├── Sparx_Math_Logo_32.png
+│   └── Sparx_Math_Logo_48.png
 ├── README.md
 ├── README.txt
 ├── background.js
