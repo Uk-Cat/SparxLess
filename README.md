@@ -1,6 +1,6 @@
 SparxLess Installation
 
-V1.3.0 Alpha v5
+V1.3.0 Alpha v6
 
 [<img src="https://img.youtube.com/vi/2TPXqmkxeZs/hqdefault.jpg" width="600" height="400"
 />](https://www.youtube.com/embed/2TPXqmkxeZs)
