@@ -35,6 +35,15 @@
                 <label>API Key</label>
                 <input type="password" id="api-key-input" placeholder="Paste your key here...">
             </div>
+            <div class="input-group" style="margin-top:12px;padding-top:12px;border-top:1.5px solid var(--border);">
+                <label>Database Answers</label>
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;">
+                    <span style="font-size:12px;font-weight:600;color:var(--text-muted);">Show answers from database</span>
+                    <button id="toggle-db-answers" class="toggle-switch" aria-pressed="true">
+                        <span class="toggle-knob"></span>
+                    </button>
+                </div>
+            </div>
             <button id="save-settings" class="primary-btn">Apply Changes</button>
         </div>
 

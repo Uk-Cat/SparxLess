@@ -579,24 +579,13 @@ function autoSubmitCorrectAnswer() {
         console.log('[SparxLess] Image ID :', imageId);
         console.log('[SparxLess] Answer   :', answer);
 
-        // 1. Insert/upsert the row, then confirm it once the insert is done
+        // Submit the answer — Confirmed? stays false until a second user agrees
         safeRuntimeSendMessage({
             action: 'POST_TO_SUPABASE',
             payload: { question, imageId, answer, studentName }
         }, (res) => {
             if (res?.success) {
                 console.log('[SparxLess] Auto-submit succeeded.');
-                // 2. Now the row exists — flip Confirmed? to true
-                safeRuntimeSendMessage({
-                    action: 'CONFIRM_IN_SUPABASE',
-                    payload: { question, imageId }
-                }, (confirmRes) => {
-                    if (confirmRes?.success) {
-                        console.log('[SparxLess] Row confirmed in DB.');
-                    } else {
-                        console.warn('[SparxLess] Confirm failed:', confirmRes?.error);
-                    }
-                });
             } else {
                 console.warn('[SparxLess] Auto-submit failed:', res?.error);
             }
@@ -703,13 +692,22 @@ function triggerDatabaseLookup(text, imageUrl) {
 
     const imageId = extractImageId(imageUrl);
 
-    safeRuntimeSendMessage(
-        { action: 'LOOKUP_SUPABASE', payload: { question: text, imageId } },
-        (result) => {
-            if (!result?.found) return;
-            showAnswerBanner(result.answer, result.confirmed);
-        }
-    );
+    // Respect the user's "show DB answers" preference
+    try {
+        chrome.storage.sync.get(['dbAnswersEnabled'], (pref) => {
+            if (pref.dbAnswersEnabled === false) {
+                document.getElementById('sparxless-banner')?.remove();
+                return;
+            }
+            safeRuntimeSendMessage(
+                { action: 'LOOKUP_SUPABASE', payload: { question: text, imageId } },
+                (result) => {
+                    if (!result?.found) return;
+                    showAnswerBanner(result.answer, result.confirmed);
+                }
+            );
+        });
+    } catch { /* context invalidated */ }
 }
 
 function showAnswerBanner(answer, confirmed) {
@@ -809,6 +807,29 @@ const _urlPollInterval = setInterval(() => {
 }, 500);
 
 window.addEventListener('beforeunload', unlockDisplay);
+
+// ─── WATCH FOR DB SETTING CHANGES ────────────────────────────────────────────
+// When the user toggles "show DB answers" in the popup, re-trigger or hide immediately
+
+try {
+    chrome.storage.onChanged.addListener((changes, area) => {
+        if (area !== 'sync' || !('dbAnswersEnabled' in changes)) return;
+        const enabled = changes.dbAnswersEnabled.newValue !== false;
+
+        if (!enabled) {
+            // Turned off — remove any visible banner
+            document.getElementById('sparxless-banner')?.remove();
+        } else {
+            // Turned on — re-run lookup for the current question
+            _lastLookupQuestion = null; // reset dedup so it fires again
+            const display = null; // read from storage
+            safeStorageGet([DISPLAY_STORAGE_KEY], (stored) => {
+                const d = stored[DISPLAY_STORAGE_KEY];
+                if (d?.text) triggerDatabaseLookup(d.text, d.imageUrl);
+            });
+        }
+    });
+} catch { /* context invalidated */ }
 
 // ─── MESSAGE LISTENER ─────────────────────────────────────────────────────────
 

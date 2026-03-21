@@ -177,42 +177,74 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     };
 
+    // ── DB answers toggle ──────────────────────────────────────────────────────
+    const dbToggle = document.getElementById('toggle-db-answers');
+
+    // Load saved state (default: enabled)
+    chrome.storage.sync.get(['dbAnswersEnabled'], (data) => {
+        const enabled = data.dbAnswersEnabled !== false; // default true
+        dbToggle.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+    });
+
+    dbToggle.addEventListener('click', () => {
+        const current = dbToggle.getAttribute('aria-pressed') === 'true';
+        const next = !current;
+        dbToggle.setAttribute('aria-pressed', next ? 'true' : 'false');
+        chrome.storage.sync.set({ dbAnswersEnabled: next }, () => {
+            if (next) {
+                // Re-run lookup immediately with whatever question is showing
+                const text = previewBox.innerText?.trim();
+                const imageUrl = currentImageUrl;
+                if (text) lookupAndShowResult(text, imageUrl);
+            } else {
+                // Hide result card if it was showing a DB answer
+                resultContainer.style.display = 'none';
+                toggleRaw.style.display = 'block';
+            }
+        });
+    });
+
     // ── Tab ────────────────────────────────────────────────────────────────────
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
     // ── Database lookup → result card ──────────────────────────────────────────
     function lookupAndShowResult(questionText, imageUrl) {
-        const imageId = extractImageId(imageUrl);
-        resultContainer.style.display = 'block';
-        aiRes.innerHTML = '<span style="color:#6b7280;font-size:12px;">Checking database...</span>';
-        rawContainer.style.display = 'none';
-        toggleRaw.style.display = 'none';
+        // Check if DB answers are enabled before querying
+        chrome.storage.sync.get(['dbAnswersEnabled'], (pref) => {
+            if (pref.dbAnswersEnabled === false) return; // user disabled it
 
-        chrome.runtime.sendMessage(
-            { action: 'LOOKUP_SUPABASE', payload: { question: questionText, imageId: imageId } },
-            (result) => {
-                if (chrome.runtime.lastError || !result || !result.found) {
-                    resultContainer.style.display = 'none';
-                    toggleRaw.style.display = 'block';
-                    return;
+            const imageId = extractImageId(imageUrl);
+            resultContainer.style.display = 'block';
+            aiRes.innerHTML = '<span style="color:#6b7280;font-size:12px;">Checking database...</span>';
+            rawContainer.style.display = 'none';
+            toggleRaw.style.display = 'none';
+
+            chrome.runtime.sendMessage(
+                { action: 'LOOKUP_SUPABASE', payload: { question: questionText, imageId: imageId } },
+                (result) => {
+                    if (chrome.runtime.lastError || !result || !result.found) {
+                        resultContainer.style.display = 'none';
+                        toggleRaw.style.display = 'block';
+                        return;
+                    }
+                    toggleRaw.style.display = 'none';
+                    const answerHtml = escapeHtml(String(result.answer));
+                    if (result.confirmed) {
+                        aiRes.innerHTML =
+                            '<span style="font-size:11px;color:#059669;font-weight:700;' +
+                            'text-transform:uppercase;letter-spacing:0.5px;">' +
+                            '\u2705 Confirmed Answer</span><br>' +
+                            '<strong style="font-size:16px;">' + answerHtml + '</strong>';
+                    } else {
+                        aiRes.innerHTML =
+                            '<span style="font-size:11px;color:#d97706;font-weight:700;' +
+                            'text-transform:uppercase;letter-spacing:0.5px;">' +
+                            '\u26a0\ufe0f Unconfirmed \u2014 may be wrong</span><br>' +
+                            '<strong style="font-size:16px;">' + answerHtml + '</strong>';
+                    }
                 }
-                toggleRaw.style.display = 'none';
-                const answerHtml = escapeHtml(String(result.answer));
-                if (result.confirmed) {
-                    aiRes.innerHTML =
-                        '<span style="font-size:11px;color:#059669;font-weight:700;' +
-                        'text-transform:uppercase;letter-spacing:0.5px;">' +
-                        '\u2705 Confirmed Answer</span><br>' +
-                        '<strong style="font-size:16px;">' + answerHtml + '</strong>';
-                } else {
-                    aiRes.innerHTML =
-                        '<span style="font-size:11px;color:#d97706;font-weight:700;' +
-                        'text-transform:uppercase;letter-spacing:0.5px;">' +
-                        '\u26a0\ufe0f Unconfirmed \u2014 may be wrong</span><br>' +
-                        '<strong style="font-size:16px;">' + answerHtml + '</strong>';
-                }
-            }
-        );
+            );
+        });
     }
 
     // ── Page scan: cache → live → retry ───────────────────────────────────────
