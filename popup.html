@@ -1,21 +1,25 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset="UTF-8">
     <link rel="stylesheet" href="popup.css">
 </head>
 <body>
     <div class="app-container">
+
         <header>
-            <button id="toggle-bookwork" class="icon-btn bookwork-icon-btn" title="Saved bookwork answers">Bookwork</button>
-            <div class="logo"><span>SparxLess</span></div>
-            <button id="toggle-settings" class="icon-btn">
-                <img src="Icon/SettingIcon.png" alt="Settings" id="settings-img">
-            </button>
+            <div class="logo">Sparx<span>Less</span></div>
+            <div class="header-actions">
+                <button id="toggle-bookwork" class="icon-btn">Bookwork</button>
+                <button id="toggle-settings" class="icon-btn">
+                    <img src="Icon/SettingIcon.png" alt="Settings" id="settings-img">
+                </button>
+            </div>
         </header>
 
         <!-- Settings drawer -->
         <div id="settings-panel" class="drawer">
-            <div class="drawer-header">CONFIGURATION</div>
+            <div class="drawer-header">Configuration</div>
             <div class="input-group">
                 <label>API Provider</label>
                 <select id="provider-select">
@@ -24,35 +28,37 @@
                 </select>
             </div>
             <div class="input-group">
-                <label>Model ID</label>
+                <label>Model</label>
                 <select id="model-select"></select>
             </div>
             <div class="input-group">
                 <label>API Key</label>
                 <input type="password" id="api-key-input" placeholder="Paste your key here...">
             </div>
-            <button id="save-settings" class="primary-btn">APPLY CHANGES</button>
+            <button id="save-settings" class="primary-btn">Apply Changes</button>
         </div>
 
-        <!-- Bookwork history panel -->
+        <!-- Bookwork panel -->
         <div id="bookwork-panel" class="drawer">
-            <div class="drawer-header">SAVED BOOKWORK ANSWERS</div>
+            <div class="drawer-header">Saved Bookwork Answers</div>
             <div id="bookwork-content">
-                <em style="font-size:11px;color:#6b7280;">Loading...</em>
+                <em style="font-size:11px;color:#6b7fa8;">Loading...</em>
             </div>
         </div>
 
         <main>
-            <!-- Detected question card -->
+            <!-- Detected question -->
             <div class="card preview-card">
                 <div class="card-header-row">
                     <label style="margin:0;">Detected Question</label>
                     <button id="copy-question-btn" class="copy-btn">Copy</button>
                 </div>
-                <div id="text-preview">Scanning Sparx page...</div>
+                <div id="text-preview" style="font-size:13px;line-height:1.5;font-weight:600;color:#1a2744;">
+                    Scanning Sparx page...
+                </div>
             </div>
 
-            <!-- Image preview card — hidden until an image is found -->
+            <!-- Image preview -->
             <div class="card" id="image-card" style="display:none;">
                 <div class="image-card-header">
                     <label style="margin:0;">Question Image</label>
@@ -61,14 +67,12 @@
                 <img id="image-preview" src="" alt="Question image" />
             </div>
 
-            <!-- Solve button -->
-            <button id="solve-btn" class="solve-btn">SOLVE PROBLEM</button>
+            <!-- Solve -->
+            <button id="solve-btn" class="solve-btn">✦ Solve Problem</button>
 
-            <!-- Submit to database button -->
-            <button id="submit-btn" class="submit-btn">SUBMIT TO UNCONFIRMED</button>
-            <div id="submit-status"></div>
 
-            <!-- Result card -->
+
+            <!-- Result -->
             <div id="result-container" class="card result-card" style="display:none;">
                 <div class="result-header">
                     <div class="status-indicator"></div>

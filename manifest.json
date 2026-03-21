@@ -14,7 +14,8 @@
     "https://generativelanguage.googleapis.com/*",
     "https://openrouter.ai/*",
     "https://maths.sparx-learning.com/student/package/*",
-    "https://uxcwmzmktamtlyvwzsua.supabase.co/*"
+    "https://uxcwmzmktamtlyvwzsua.supabase.co/*",
+    "https://maths.sparx-learning.com/student/independentlearning/curriculums/*"
   ],
   "background": {
     "service_worker": "background.js"

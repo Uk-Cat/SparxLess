@@ -3,6 +3,31 @@ function isSparxLogo(src) {
     return src.includes("sparx_maths_logo") || src.includes("sparx_science_logo") || src.includes("sparx_logo");
 }
 
+// ─── CONTEXT VALIDITY GUARD ───────────────────────────────────────────────────
+// When the extension is reloaded while a content script is still running,
+// all chrome.* API calls throw "Extension context invalidated".
+// These helpers silently no-op in that case so errors stop appearing.
+
+function isContextValid() {
+    try { return !!chrome.runtime?.id; } catch { return false; }
+}
+function safeStorageGet(keys, cb) {
+    if (!isContextValid()) return;
+    try { chrome.storage.local.get(keys, cb); } catch { /* context gone */ }
+}
+function safeStorageSet(obj, cb) {
+    if (!isContextValid()) return;
+    try { chrome.storage.local.set(obj, cb); } catch { /* context gone */ }
+}
+function safeStorageRemove(keys, cb) {
+    if (!isContextValid()) return;
+    try { chrome.storage.local.remove(keys, cb); } catch { /* context gone */ }
+}
+function safeRuntimeSendMessage(msg, cb) {
+    if (!isContextValid()) return;
+    try { chrome.runtime.sendMessage(msg, cb); } catch { /* context gone */ }
+}
+
 // ─── STORAGE KEYS ────────────────────────────────────────────────────────────
 const BOOKWORK_STORAGE_KEY = "SparxLessBookwork";
 const PENDING_STORAGE_KEY  = "SparxLessPending";
@@ -15,15 +40,18 @@ let _lastUrl       = location.href;
 
 function getBookworkStore() {
     return new Promise(resolve => {
-        chrome.storage.local.get([BOOKWORK_STORAGE_KEY], result => {
-            resolve(result[BOOKWORK_STORAGE_KEY] || {});
-        });
+        if (!isContextValid()) return resolve({});
+        try {
+            chrome.storage.local.get([BOOKWORK_STORAGE_KEY], result => {
+                resolve(result[BOOKWORK_STORAGE_KEY] || {});
+            });
+        } catch { resolve({}); }
     });
 }
 
 function setBookworkStore(store) {
     return new Promise(resolve => {
-        chrome.storage.local.set({ [BOOKWORK_STORAGE_KEY]: store }, resolve);
+        safeStorageSet({ [BOOKWORK_STORAGE_KEY]: store }, resolve);
     });
 }
 
@@ -54,22 +82,35 @@ function extractTextNodes(node) {
 }
 
 function findAndExtractAll() {
-    const containers = document.querySelectorAll('[class*="_TextElement_"], [class*="_QuestionContainer_"]');
+    // Try scoped extraction: grab _TextElement_ nodes that sit inside a _Question_ wrapper
+    const questionWrappers = document.querySelectorAll('[class*="_Question_"]');
     let results = [];
-    containers.forEach(container => {
-        const cleaned = extractTextNodes(container).replace(/\s+/g, ' ').trim();
-        if (cleaned && !isNoise(cleaned) && !results.includes(cleaned)) {
-            results.push(cleaned);
-        }
-    });
+
+    if (questionWrappers.length > 0) {
+        questionWrappers.forEach(wrapper => {
+            wrapper.querySelectorAll('[class*="_TextElement_"]').forEach(el => {
+                const cleaned = extractTextNodes(el).replace(/\s+/g, ' ').trim();
+                if (cleaned && !isNoise(cleaned) && !results.includes(cleaned)) {
+                    results.push(cleaned);
+                }
+            });
+        });
+    }
+
+    // Fallback: any _TextElement_ or _QuestionContainer_ anywhere on the page
+    if (results.length === 0) {
+        document.querySelectorAll('[class*="_TextElement_"], [class*="_QuestionContainer_"]').forEach(container => {
+            const cleaned = extractTextNodes(container).replace(/\s+/g, ' ').trim();
+            if (cleaned && !isNoise(cleaned) && !results.includes(cleaned)) {
+                results.push(cleaned);
+            }
+        });
+    }
+
     return results.join('\n\n');
 }
 
 // ─── STUDENT NAME EXTRACTION ──────────────────────────────────────────────────
-// FIX: Added — reads the student name from the _StudentName_ element.
-// Sparx uses BEM-style hashed class names so we match on the stable
-// semantic fragment "_StudentName_" rather than the full hashed string.
-
 function getCurrentStudentName() {
     const el = document.querySelector('[class*="_StudentName_"]');
     if (el) {
@@ -82,6 +123,15 @@ function getCurrentStudentName() {
 // ─── QUESTION TEXT ────────────────────────────────────────────────────────────
 
 function getCurrentQuestionText() {
+    // Prefer _TextElement_ scoped inside a _Question_ wrapper
+    const questionWrappers = document.querySelectorAll('[class*="_Question_"]');
+    for (const wrapper of questionWrappers) {
+        for (const el of wrapper.querySelectorAll('[class*="_TextElement_"]')) {
+            const cleaned = extractTextNodes(el).replace(/\s+/g, ' ').trim();
+            if (cleaned && !isNoise(cleaned)) return cleaned;
+        }
+    }
+    // Fallback: any _TextElement_ or _QuestionContainer_
     const containers = document.querySelectorAll('[class*="_TextElement_"], [class*="_QuestionContainer_"]');
     for (const container of containers) {
         const cleaned = extractTextNodes(container).replace(/\s+/g, ' ').trim();
@@ -93,12 +143,21 @@ function getCurrentQuestionText() {
 // ─── IMAGE ID EXTRACTION ──────────────────────────────────────────────────────
 
 function getCurrentImageId() {
-    const imgs = document.querySelectorAll('img');
     const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
-    for (const img of imgs) {
+
+    // Prefer images with the _Image_ class inside a _Question_ wrapper (most specific)
+    for (const img of document.querySelectorAll('[class*="_Question_"] [class*="_Image_"], [class*="_ImageContainer_"] img')) {
         const src = img.src || '';
         if (isSparxLogo(src)) continue;
-        if (!src.includes('sparx-learning.com') && !src.includes('sparxmaths')) continue;
+        const match = src.match(uuidRegex);
+        if (match) return match[0];
+    }
+
+    // Fallback: any img whose src contains a UUID and looks like a Sparx asset
+    for (const img of document.querySelectorAll('img')) {
+        const src = img.src || '';
+        if (isSparxLogo(src)) continue;
+        if (!src.includes('sparx-learning.com') && !src.includes('sparxmaths') && !src.includes('cdn.sparx')) continue;
         const match = src.match(uuidRegex);
         if (match) return match[0];
     }
@@ -106,7 +165,6 @@ function getCurrentImageId() {
 }
 
 // Extracts the UUID from an image URL, or returns null if none found.
-// Used so we always store the ID not the full URL in the database.
 function extractImageId(url) {
     if (!url) return null;
     const match = url.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
@@ -144,25 +202,36 @@ function getCurrentAnswer() {
 
 // ─── PENDING TEMP STORE ───────────────────────────────────────────────────────
 
+// Reads bookwork code from the chip element or React fiber (used outside of saveCurrentAnswer)
+function getCurrentBookworkCode() {
+    // Try React fiber first
+    const questionInfo = document.querySelector('[class*="_QuestionInfo_"]');
+    if (questionInfo) {
+        try {
+            const fiber = getReactFiber(questionInfo);
+            if (fiber?.memoizedProps?.bookworkCode) return fiber.memoizedProps.bookworkCode;
+        } catch { /* fall through */ }
+    }
+    return getBookworkCodeFromDOM();
+}
+
 function savePending() {
-    // Only snapshot during the answer-input phase — use the display lock as the
-    // signal: if the display is already locked we're past the question phase.
     if (_displayLocked) return;
 
-    const question    = getCurrentQuestionText();
-    const imageId     = getCurrentImageId();
-    const answer      = getCurrentAnswer();
-    const studentName = getCurrentStudentName();
+    const question     = getCurrentQuestionText();
+    const imageId      = getCurrentImageId();
+    const answer       = getCurrentAnswer();
+    const studentName  = getCurrentStudentName();
+    const bookworkCode = getCurrentBookworkCode();
 
     if (!question) return;
 
-    chrome.storage.local.set({
-        [PENDING_STORAGE_KEY]: { question, imageId: imageId ?? null, answer: answer ?? null, studentName: studentName ?? null }
+    safeStorageSet({
+        [PENDING_STORAGE_KEY]: { question, imageId: imageId ?? null, answer: answer ?? null, studentName: studentName ?? null, bookworkCode: bookworkCode ?? null }
     });
 }
 
-// ─── REACT FIBER HELPERS (copied from SparxSolver) ──────────────────────────
-// Gets the React fiber attached to a DOM node.
+// ─── REACT FIBER HELPERS ─────────────────────────────────────────────────────
 
 function getReactFiber(el) {
     if (!el) return null;
@@ -174,7 +243,6 @@ function getReactFiber(el) {
     return key ? el[key] : null;
 }
 
-// Walks a React tree looking for a node that satisfies the predicate.
 function findInReactTree(node, predicate, walkable = ['props', 'children'], maxDepth = 150) {
     if (!node || maxDepth <= 0) return null;
     try { if (predicate(node)) return node; } catch { /* skip */ }
@@ -191,28 +259,23 @@ function findInReactTree(node, predicate, walkable = ['props', 'children'], maxD
     return null;
 }
 
-// ─── BOOKWORK SAVING (React-fiber approach from SparxSolver) ─────────────────
-// Reads bookworkCode and answers directly from React's internal state so it
-// works regardless of CSS class-name hash changes.
+// ─── BOOKWORK SAVING ─────────────────────────────────────────────────────────
 
 function extractAnswersFromReactInput(inputObj) {
     if (!inputObj) return [];
     const answers = [];
     const isEmpty = o => !o || Object.keys(o).length === 0;
 
-    // Numeric / text input fields
     if (!isEmpty(inputObj.number_fields)) {
         Object.values(inputObj.number_fields).forEach(f => {
             if (f.value != null && String(f.value).trim()) answers.push(String(f.value).trim());
         });
     }
-    // Drag-and-drop card slots
     if (!isEmpty(inputObj.cards)) {
         Object.values(inputObj.cards).forEach(c => {
             if (c.slot_ref && c.content?.[0]?.text) answers.push(c.content[0].text);
         });
     }
-    // Multiple-choice tiles
     if (!isEmpty(inputObj.choices)) {
         Object.values(inputObj.choices).forEach(c => {
             if (c.selected && c.content?.[0]?.text) answers.push(c.content[0].text);
@@ -222,7 +285,6 @@ function extractAnswersFromReactInput(inputObj) {
 }
 
 function getBookworkDataFromReact() {
-    // Primary: read from React fiber on the QuestionWrapper / QuestionInfo elements
     const questionWrapper = document.querySelector('[class*="_QuestionWrapper_"]');
     const questionInfo    = document.querySelector('[class*="_QuestionInfo_"]');
     if (!questionWrapper || !questionInfo) return null;
@@ -232,25 +294,19 @@ function getBookworkDataFromReact() {
         const infoFiber    = getReactFiber(questionInfo);
         if (!wrapperFiber || !infoFiber) return null;
 
-        // Find the node that has both layout + input props (the question state)
         const questionNode = findInReactTree(
             wrapperFiber.memoizedProps?.children,
             n => n && n.layout && n.input
         );
         if (!questionNode) return null;
 
-        // Extract the question text from layout
         const textNode = findInReactTree(
             questionNode.layout,
             n => n && n.element === 'text',
             ['content']
         );
         const questionText = textNode?.text || null;
-
-        // Bookwork code lives on the QuestionInfo fiber
         const code = infoFiber.memoizedProps?.bookworkCode || null;
-
-        // Answers from structured input object
         const answers = extractAnswersFromReactInput(questionNode.input);
 
         return { code, questionText, answers };
@@ -259,24 +315,37 @@ function getBookworkDataFromReact() {
     }
 }
 
-// Falls back to DOM-based extraction when React fiber isn't available
-function getBookworkDataFromDOM() {
-    // Code
+function getBookworkCodeFromDOM() {
+    // Matches any chip/element with text like:
+    //   "Bookwork 4A"           (WAC dialog chip)
+    //   "Bookwork code: 4A"     (question page chip)
+    //   "Bookwork code 4A"
+    const BOOKWORK_RE = /Bookwork(?:\s+code)?[:\s]+([A-Z0-9]+)/i;
+
+    // Primary: any _Chip_ element on the page
+    const chips = document.querySelectorAll('[class*="_Chip_"]');
+    for (const chip of chips) {
+        const text  = (chip.innerText || chip.textContent).trim();
+        const match = text.match(BOOKWORK_RE);
+        if (match) return match[1].trim();
+    }
+    // Fallback: dedicated bookwork code elements
     const codeEl = document.querySelector('[class*="_BookworkCode_"], [class*="_Bookwork_"]');
-    let code = null;
     if (codeEl) {
         const text  = codeEl.innerText || codeEl.textContent;
-        const match = text.match(/Bookwork code[:\s]+([A-Z0-9]+)/i);
-        if (match) code = match[1].trim();
-        else {
-            const fallback = text.trim().replace(/\s+/g, '');
-            if (/^[A-Z0-9]{1,4}$/i.test(fallback)) code = fallback;
-        }
+        const match = text.match(BOOKWORK_RE);
+        if (match) return match[1].trim();
+        const fallback = text.trim().replace(/\s+/g, '');
+        if (/^[A-Z0-9]{1,4}$/i.test(fallback)) return fallback;
     }
+    return null;
+}
+
+function getBookworkDataFromDOM() {
+    const code = getBookworkCodeFromDOM();
 
     const questionText = getCurrentQuestionText();
 
-    // Answers
     const answers = [];
     document.querySelectorAll('input[type="text"], input[type="number"], input[inputmode="decimal"], input[inputmode="numeric"]').forEach(input => {
         const val = input.value?.trim();
@@ -300,11 +369,13 @@ function getBookworkDataFromDOM() {
 }
 
 async function saveCurrentAnswer() {
-    // Try React fiber first (more reliable), fall back to DOM scraping
-    const data = getBookworkDataFromReact() || getBookworkDataFromDOM();
-    const { code, questionText, answers } = data || {};
+    const reactData    = getBookworkDataFromReact();
+    const domData      = getBookworkDataFromDOM();
+    const code         = reactData?.code        || domData?.code        || getBookworkCodeFromDOM();
+    const questionText = reactData?.questionText || domData?.questionText;
+    const answers      = (reactData?.answers?.length ? reactData.answers : domData?.answers) || [];
 
-    if (!code || !questionText || !answers || answers.length === 0) return;
+    if (!code || !questionText || answers.length === 0) return;
 
     const normalise = str => str.replace(/\$.*?\$/g, '').replace(/ +/g, ' ').trim();
     const store     = await getBookworkStore();
@@ -332,23 +403,38 @@ function initAnswerSaving() {
 initAnswerSaving();
 
 // ─── PROACTIVE DISPLAY LOCK ───────────────────────────────────────────────────
-// Calls lockDisplay() automatically whenever the DOM changes — no popup needed.
-// This means the question+image are captured and frozen as soon as the student
-// lands on a question, even if they never open the extension.
 
 function tryLockDisplay() {
-    if (_displayLocked) return; // already locked, skip the DOM work entirely
-    const text     = findAndExtractAll();
-    const imageUrl = (Array.from(document.querySelectorAll('img'))
-        .map(i => i.src)
-        .filter(s => s && !isSparxLogo(s) && s.includes('sparx-learning.com')))[0] || null;
+    if (_displayLocked) return;
+    let text = findAndExtractAll();
+    // Hard fallback: grab raw innerText of the _Question_ wrapper if structured extraction found nothing
+    if (!text) {
+        const qEl = document.querySelector('[class*="_Question_"]');
+        if (qEl) text = qEl.innerText?.replace(/\s+/g, ' ').trim() || '';
+    }
+
+    // Pick the first question image: prefer _Image_ class, fall back to any Sparx CDN img
+    const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+    let imageUrl = null;
+
+    for (const img of document.querySelectorAll('[class*="_Question_"] [class*="_Image_"], [class*="_ImageContainer_"] img')) {
+        const src = img.src || '';
+        if (!isSparxLogo(src) && uuidRegex.test(src)) { imageUrl = src; break; }
+    }
+    if (!imageUrl) {
+        for (const img of document.querySelectorAll('img')) {
+            const src = img.src || '';
+            if (!isSparxLogo(src) && (src.includes('sparx-learning.com') || src.includes('cdn.sparx') || src.includes('sparxmaths')) && uuidRegex.test(src)) {
+                imageUrl = src; break;
+            }
+        }
+    }
+
     lockDisplay(text, imageUrl);
 }
 
-// Run once immediately on script load
 tryLockDisplay();
 
-// Then watch for DOM changes so it fires as soon as Sparx renders the question
 let _lockDebounce = null;
 const lockObserver = new MutationObserver(() => {
     if (_displayLocked) return;
@@ -358,84 +444,66 @@ const lockObserver = new MutationObserver(() => {
 lockObserver.observe(document.body, { childList: true, subtree: true });
 
 // ─── BOOKWORK CHECK AUTO-FILL ────────────────────────────────────────────────
-// When Sparx shows a bookwork check (WAC = "What Answers Checked"), we:
-//  1. Read the bookwork code from the React fiber on the WAC container
-//  2. Look up our saved answers for that code
-//  3. Compare each multiple-choice option against saved answers and click the match
-//
-// This mirrors SparxSolver's Fs() + Hs() functions, adapted for a content script
-// (no React render patching — we use MutationObserver + React fiber reads instead).
+// Pure DOM approach — reads the bookwork code from the _Chip_ inside the WAC
+// container, reads each option's visible text from .answer-block spans, then
+// clicks the one that matches the saved answer for that code.
 
-// Walk up the React fiber tree to find a component whose memoizedProps contain
-// a bookworkCode field (lives on the parent question-info component).
-function getWacBookworkCode(fiber) {
-    let node = fiber;
-    for (let i = 0; i < 30 && node; i++) {
-        const code = node.memoizedProps?.bookworkCode
-                  || node.pendingProps?.bookworkCode;
-        if (code) return code;
-        node = node.return;
-    }
-    return null;
+let _wacLastCode = null;
+
+// Extracts the bookwork code from the WAC dialog chip.
+// The chip reads e.g. "Bookwork 4A" or "Bookwork code: 4A"
+function getWacCode(wacEl) {
+    const chip = wacEl.querySelector('[class*="_Chip_"]');
+    if (!chip) return null;
+    const text = (chip.innerText || chip.textContent).trim();
+    // Match "Bookwork 4A", "Bookwork code 4A", "Bookwork code: 4A" etc.
+    const match = text.match(/Bookwork(?:\s+code)?[:\s]+([A-Z0-9]+)/i);
+    return match ? match[1].trim() : null;
 }
 
-// Walk the React props tree to find the choices array (multiple-choice options).
-// SparxSolver looks for b.props.choices && b.props.option
-function getWacChoices(fiber) {
-    const props = fiber?.memoizedProps;
-    if (!props) return null;
-
-    // Direct hit — this fiber IS the choice picker
-    if (props.choices && props.option !== undefined) return props;
-
-    // Walk children props recursively (BFS, shallow)
-    const queue = [props];
-    for (let i = 0; i < 200 && queue.length; i++) {
-        const cur = queue.shift();
-        if (!cur || typeof cur !== 'object') continue;
-        if (cur.choices && cur.option !== undefined) return cur;
-        for (const val of Object.values(cur)) {
-            if (val && typeof val === 'object' && !Array.isArray(val)) queue.push(val);
-            if (Array.isArray(val)) val.forEach(v => v && typeof v === 'object' && queue.push(v));
-        }
-    }
-    return null;
+// Returns the visible answer text of a WAC option element.
+// Reads .answer-block spans and katex annotations, joining them.
+function getWacOptionText(optionEl) {
+    const parts = [];
+    // Numeric/text blocks
+    optionEl.querySelectorAll('.answer-block').forEach(el => {
+        const t = el.innerText?.trim();
+        if (t) parts.push(t);
+    });
+    // LaTeX via annotation
+    optionEl.querySelectorAll('annotation[encoding="application/x-tex"]').forEach(el => {
+        const t = el.textContent?.trim();
+        if (t) parts.push(t);
+    });
+    return parts.join(' ').trim();
 }
 
-// Get the WAC choice picker fiber by walking fiber siblings/children
-function findChoiceFiber(rootFiber) {
-    const queue = [rootFiber];
-    for (let i = 0; i < 500 && queue.length; i++) {
-        const f = queue.shift();
-        if (!f) continue;
-        const p = f.memoizedProps;
-        if (p && p.choices && p.option !== undefined) return f;
-        if (f.child)   queue.push(f.child);
-        if (f.sibling) queue.push(f.sibling);
-    }
-    return null;
+// Normalise answer strings for comparison: strip LaTeX delimiters, collapse spaces
+function normaliseAnswer(s) {
+    return String(s)
+        .replace(/\\[a-zA-Z]+/g, '')   // strip LaTeX commands like \degree
+        .replace(/[{}$°]/g, '')           // strip braces, dollar signs, degree symbols
+        .replace(/\s+/g, ' ')
+        .trim();
 }
-
-let _wacLastCode = null; // debounce: don't re-run for the same WAC code
 
 function runBookworkCheck() {
     const wacEl = document.querySelector('[class*="_WACContainer_"]');
     if (!wacEl) return;
 
-    const fiber = getReactFiber(wacEl);
-    if (!fiber) return;
-
-    // 1. Get the bookwork code
-    const code = getWacBookworkCode(fiber);
-    if (!code || code === _wacLastCode) return;
+    const code = getWacCode(wacEl);
+    if (!code) {
+        console.log('[SparxLess] WAC visible but could not read bookwork code');
+        return;
+    }
+    if (code === _wacLastCode) return;
     _wacLastCode = code;
 
     console.log('[SparxLess] Bookwork check detected, code:', code);
 
-    // 2. Look up saved answers for this code
     getBookworkStore().then(store => {
         const entries = Array.isArray(store[code])
-            ? store[code].filter(e => Array.isArray(e.answers))
+            ? store[code].filter(e => Array.isArray(e.answers) && e.answers.length > 0)
             : [];
 
         if (entries.length === 0) {
@@ -443,70 +511,56 @@ function runBookworkCheck() {
             return;
         }
 
-        // 3. Find the choice picker fiber
-        const choiceFiber = findChoiceFiber(fiber);
-        if (!choiceFiber) {
-            console.log('[SparxLess] Could not find choice picker fiber');
-            return;
+        // Build a flat set of normalised saved answers (most recent entry first)
+        const savedAnswers = [];
+        for (const entry of entries) {
+            for (const ans of entry.answers) {
+                const n = normaliseAnswer(ans);
+                if (n && !savedAnswers.includes(n)) savedAnswers.push(n);
+            }
         }
+        console.log('[SparxLess] Saved answers to match:', savedAnswers);
 
-        const choiceProps = choiceFiber.memoizedProps;
-        if (!choiceProps?.choices) return;
+        // Find all clickable option elements
+        const optionEls = wacEl.querySelectorAll('[class*="_WACOption_"]');
+        let matched = false;
 
-        // 4. For each choice option, strip HTML/LaTeX delimiters and compare
-        //    against saved answers (most recent first)
-        const strip = s => s.replace(/<[^>]+>/g, '').replace(/^\$|\$$/g, '').trim();
+        optionEls.forEach(optEl => {
+            if (matched) return;
+            const optText = normaliseAnswer(getWacOptionText(optEl));
+            console.log('[SparxLess] WAC option text:', optText);
 
-        choiceProps.choices.forEach(({ element, onSelect }) => {
-            const markup = element?.props?.markup || element?.props?.children || '';
-            const cleaned = strip(String(markup));
-
-            // Check against all saved entries (most recent first)
-            for (const entry of entries) {
-                const savedJoined = strip(entry.answers.join(''));
-                if (savedJoined === cleaned) {
-                    console.log('[SparxLess] Auto-selecting bookwork answer:', cleaned);
-                    onSelect?.();
-                    return;
-                }
-                // Also try matching any individual answer
-                for (const ans of entry.answers) {
-                    if (strip(String(ans)) === cleaned) {
-                        console.log('[SparxLess] Auto-selecting bookwork answer:', cleaned);
-                        onSelect?.();
-                        return;
-                    }
-                }
+            if (savedAnswers.some(ans => ans === optText || optText.includes(ans) || ans.includes(optText))) {
+                console.log('[SparxLess] Clicking matching option:', optText);
+                optEl.click();
+                matched = true;
             }
         });
+
+        if (!matched) {
+            console.log('[SparxLess] No WAC option matched saved answers');
+        }
     });
 }
 
-// Watch for the WAC container appearing in the DOM
 let _wacDebounce = null;
 const wacObserver = new MutationObserver(() => {
     const wacEl = document.querySelector('[class*="_WACContainer_"]');
     if (!wacEl) {
-        _wacLastCode = null; // reset when WAC disappears so next one fires
+        _wacLastCode = null; // reset so next WAC fires fresh
         return;
     }
     clearTimeout(_wacDebounce);
-    _wacDebounce = setTimeout(runBookworkCheck, 300);
+    _wacDebounce = setTimeout(runBookworkCheck, 400);
 });
 wacObserver.observe(document.body, { childList: true, subtree: true });
 
 // ─── AUTO-SUBMIT ON CORRECT ───────────────────────────────────────────────────
-// Watches the DOM for _ResultMessage_ containing "Correct!" and automatically
-// posts the current question/imageId/answer/studentName to Supabase.
-// A debounce prevents double-firing if Sparx re-renders the element.
 
-let lastAutoSubmitKey = null; // tracks last submitted question to avoid duplicates
+let lastAutoSubmitKey = null;
 
 function autoSubmitCorrectAnswer() {
-    // Read question+imageId from the LOCKED display cache — this is always the
-    // original question, never the post-answer DOM content.
-    // Read answer from the PENDING snapshot — captured on last interaction before submit.
-    chrome.storage.local.get([DISPLAY_STORAGE_KEY, PENDING_STORAGE_KEY], (result) => {
+    safeStorageGet([DISPLAY_STORAGE_KEY, PENDING_STORAGE_KEY], (result) => {
         const display = result[DISPLAY_STORAGE_KEY];
         const pending = result[PENDING_STORAGE_KEY];
 
@@ -516,8 +570,6 @@ function autoSubmitCorrectAnswer() {
         const studentName = pending?.studentName ?? getCurrentStudentName();
 
         if (!question) return;
-
-        // Deduplicate: don't resubmit the same question twice in a row
         if (question === lastAutoSubmitKey) return;
         lastAutoSubmitKey = question;
 
@@ -527,12 +579,24 @@ function autoSubmitCorrectAnswer() {
         console.log('[SparxLess] Image ID :', imageId);
         console.log('[SparxLess] Answer   :', answer);
 
-        chrome.runtime.sendMessage({
+        // 1. Insert/upsert the row, then confirm it once the insert is done
+        safeRuntimeSendMessage({
             action: 'POST_TO_SUPABASE',
             payload: { question, imageId, answer, studentName }
         }, (res) => {
             if (res?.success) {
                 console.log('[SparxLess] Auto-submit succeeded.');
+                // 2. Now the row exists — flip Confirmed? to true
+                safeRuntimeSendMessage({
+                    action: 'CONFIRM_IN_SUPABASE',
+                    payload: { question, imageId }
+                }, (confirmRes) => {
+                    if (confirmRes?.success) {
+                        console.log('[SparxLess] Row confirmed in DB.');
+                    } else {
+                        console.warn('[SparxLess] Confirm failed:', confirmRes?.error);
+                    }
+                });
             } else {
                 console.warn('[SparxLess] Auto-submit failed:', res?.error);
             }
@@ -542,11 +606,45 @@ function autoSubmitCorrectAnswer() {
 
 let correctDebounceTimer = null;
 
+// Wrong-answer messages Sparx shows — any of these triggers a delete
+const WRONG_ANSWER_MESSAGES = [
+    'Finding this one tricky?',
+    'Not quite',
+    'Incorrect',
+];
+
+function autoDeleteWrongAnswer() {
+    safeStorageGet([DISPLAY_STORAGE_KEY, PENDING_STORAGE_KEY], (result) => {
+        const display = result[DISPLAY_STORAGE_KEY];
+        const question = display?.text ?? getCurrentQuestionText();
+        const imageId  = extractImageId(display?.imageUrl) ?? getCurrentImageId();
+
+        if (!question) return;
+
+        console.log('[SparxLess] Wrong answer detected — deleting from DB...');
+        safeRuntimeSendMessage({
+            action: 'DELETE_FROM_SUPABASE',
+            payload: { question, imageId }
+        }, (res) => {
+            if (res?.success) {
+                console.log('[SparxLess] Row(s) deleted after wrong answer.');
+            } else {
+                console.warn('[SparxLess] Delete failed:', res?.error);
+            }
+        });
+    });
+}
+
 const correctObserver = new MutationObserver(() => {
     const resultEl = document.querySelector('[class*="_ResultMessage_"]');
-    if (resultEl && resultEl.innerText?.trim() === 'Correct!') {
+    if (!resultEl) return;
+    const msg = resultEl.innerText?.trim();
+    if (msg === 'Correct!') {
         clearTimeout(correctDebounceTimer);
         correctDebounceTimer = setTimeout(autoSubmitCorrectAnswer, 300);
+    } else if (WRONG_ANSWER_MESSAGES.some(w => msg?.includes(w))) {
+        clearTimeout(correctDebounceTimer);
+        correctDebounceTimer = setTimeout(autoDeleteWrongAnswer, 300);
     }
 });
 
@@ -574,28 +672,136 @@ async function performAutoSolve(answer) {
     }
 }
 
-// ─── DISPLAY CACHE — LOCK ON FIRST VALID QUESTION, CLEAR ON NAVIGATION ─────────
-// Strategy: once we have a valid question+image, lock the display cache and
-// refuse all further writes until the URL changes (next question/page).
-// This is more robust than checking for the Answer button, which may remain
-// hidden-but-present in the DOM after the student submits.
+// ─── DISPLAY CACHE — LOCK ON FIRST VALID QUESTION, CLEAR ON NAVIGATION ───────
 
 function lockDisplay(text, imageUrl) {
-    if (_displayLocked) return;          // already locked — ignore all further calls
-    if (!text && !imageUrl) return;      // nothing worth locking yet
+    if (_displayLocked) return;
+    if (!text && !imageUrl) return;
     _displayLocked = true;
-    chrome.storage.local.set({
+    safeStorageSet({
         [DISPLAY_STORAGE_KEY]: { text: text || null, imageUrl: imageUrl || null, url: location.href }
     });
+    // Kick off a database lookup now that we have a locked question
+    triggerDatabaseLookup(text, imageUrl);
 }
 
 function unlockDisplay() {
     _displayLocked = false;
-    chrome.storage.local.remove([DISPLAY_STORAGE_KEY]);
+    _lastLookupQuestion = null;
+    document.getElementById('sparxless-banner')?.remove();
+    safeStorageRemove([DISPLAY_STORAGE_KEY]);
+}
+
+// ─── DATABASE LOOKUP + ANSWER BANNER ─────────────────────────────────────────
+
+let _lastLookupQuestion = null;
+
+function triggerDatabaseLookup(text, imageUrl) {
+    if (!text) return;
+    if (text === _lastLookupQuestion) return;
+    _lastLookupQuestion = text;
+
+    const imageId = extractImageId(imageUrl);
+
+    safeRuntimeSendMessage(
+        { action: 'LOOKUP_SUPABASE', payload: { question: text, imageId } },
+        (result) => {
+            if (!result?.found) return;
+            showAnswerBanner(result.answer, result.confirmed);
+        }
+    );
+}
+
+function showAnswerBanner(answer, confirmed) {
+    document.getElementById('sparxless-banner')?.remove();
+
+    const banner = document.createElement('div');
+    banner.id = 'sparxless-banner';
+
+    const isConfirmed = confirmed === true;
+    const bgColor     = isConfirmed ? '#f0fdf4' : '#fffbeb';
+    const borderColor = isConfirmed ? '#22c55e' : '#f59e0b';
+    const textColor   = isConfirmed ? '#14532d' : '#78350f';
+    const accentColor = isConfirmed ? '#22c55e' : '#f59e0b';
+    const label       = isConfirmed
+        ? '\u2705 The answer is'
+        : '\u26a0\ufe0f The answer might be';
+
+    banner.style.cssText = [
+        'position:fixed',
+        'top:16px',
+        'right:16px',
+        'z-index:999999',
+        'background:' + bgColor,
+        'border:3px solid ' + borderColor,
+        'border-radius:16px',
+        'padding:20px 24px 24px 24px',
+        'width:360px',
+        'box-shadow:0 8px 32px rgba(0,0,0,0.18)',
+        "font-family:'Nunito','Segoe UI',system-ui,sans-serif",
+        'color:' + textColor,
+        'line-height:1.4',
+    ].join(';');
+
+    // Top row: brand tag + close button
+    const topRow = document.createElement('div');
+    topRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;';
+
+    const tag = document.createElement('div');
+    tag.style.cssText = 'font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;color:' + accentColor + ';';
+    tag.textContent = 'SparxLess';
+
+    const close = document.createElement('button');
+    close.textContent = '\u2715';
+    close.style.cssText = 'background:none;border:none;cursor:pointer;font-size:16px;color:' + textColor + ';opacity:0.4;padding:0;line-height:1;';
+    close.addEventListener('click', () => banner.remove());
+
+    topRow.appendChild(tag);
+    topRow.appendChild(close);
+
+    // Label
+    const labelEl = document.createElement('div');
+    labelEl.style.cssText = 'font-size:15px;font-weight:700;margin-bottom:10px;opacity:0.8;';
+    labelEl.textContent = label;
+
+    // Answer — big and prominent
+    const answerEl = document.createElement('div');
+    answerEl.style.cssText = [
+        'font-size:42px',
+        'font-weight:900',
+        'letter-spacing:-1px',
+        'line-height:1.1',
+        'color:' + textColor,
+        'word-break:break-word',
+    ].join(';');
+    answerEl.textContent = String(answer);
+
+    // Divider
+    const divider = document.createElement('div');
+    divider.style.cssText = 'height:2px;background:' + borderColor + ';opacity:0.3;margin:14px 0 10px;border-radius:2px;';
+
+    // Footer hint
+    const footer = document.createElement('div');
+    footer.style.cssText = 'font-size:11px;opacity:0.5;font-weight:600;';
+    footer.textContent = 'Auto-dismisses in 15s';
+
+    banner.appendChild(topRow);
+    banner.appendChild(labelEl);
+    banner.appendChild(answerEl);
+    banner.appendChild(divider);
+    banner.appendChild(footer);
+    document.body.appendChild(banner);
+
+    setTimeout(() => banner.remove(), 15000);
 }
 
 // Poll for URL change (Sparx is a SPA — no real page reload between questions)
-setInterval(() => {
+// Clears itself if the extension context is invalidated (e.g. after a reload)
+const _urlPollInterval = setInterval(() => {
+    if (!isContextValid()) {
+        clearInterval(_urlPollInterval);
+        return;
+    }
     if (location.href !== _lastUrl) {
         _lastUrl = location.href;
         unlockDisplay();
@@ -609,15 +815,30 @@ window.addEventListener('beforeunload', unlockDisplay);
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     if (request.action === 'extractAll') {
-        const extractedText   = findAndExtractAll();
-        const extractedImages = Array.from(document.querySelectorAll('img'))
-                                     .map(i => i.src)
-                                     .filter(s => s && !isSparxLogo(s) && s.includes('sparx-learning.com'));
+        const uuidRe = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
-        // Lock the display cache on the first valid extraction.
-        // Subsequent extractAll calls (e.g. popup reopen mid-answer) are ignored
-        // by lockDisplay() — the cache stays frozen until the URL changes.
+        // Text: use structured extractor, fall back to raw innerText of _Question_ wrapper
+        let extractedText = findAndExtractAll();
+        if (!extractedText) {
+            const qEl = document.querySelector('[class*="_Question_"]');
+            if (qEl) {
+                extractedText = qEl.innerText?.replace(/\s+/g, ' ').trim() || '';
+            }
+        }
+
+        // Images: prefer _Image_ inside question, then any Sparx CDN img with UUID
+        const extractedImages = [
+            ...document.querySelectorAll('[class*="_Question_"] [class*="_Image_"], [class*="_ImageContainer_"] img'),
+            ...document.querySelectorAll('img')
+        ]
+            .map(i => i.src)
+            .filter((s, idx, arr) => arr.indexOf(s) === idx)
+            .filter(s => s && !isSparxLogo(s) && uuidRe.test(s) &&
+                (s.includes('sparx-learning.com') || s.includes('cdn.sparx') || s.includes('sparxmaths')));
+
         lockDisplay(extractedText, extractedImages[0] || null);
+
+        console.log('[SparxLess] extractAll → text:', extractedText?.slice(0,80), '| images:', extractedImages.length);
 
         sendResponse({
             text:        extractedText,
@@ -641,12 +862,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return true;
 
     } else if (request.action === 'SAVE_QUESTION') {
-        chrome.storage.local.get([DISPLAY_STORAGE_KEY, PENDING_STORAGE_KEY], (result) => {
+        safeStorageGet([DISPLAY_STORAGE_KEY, PENDING_STORAGE_KEY], (result) => {
             const display = result[DISPLAY_STORAGE_KEY];
             const pending = result[PENDING_STORAGE_KEY];
 
-            // question + imageId always come from the locked display cache
-            // answer + studentName come from the pending interaction snapshot
             const question    = display?.text        ?? getCurrentQuestionText();
             const imageId     = extractImageId(display?.imageUrl) ?? getCurrentImageId();
             const answer      = pending?.answer      ?? getCurrentAnswer();
@@ -664,7 +883,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 return;
             }
 
-            chrome.runtime.sendMessage(
+            safeRuntimeSendMessage(
                 { action: 'POST_TO_SUPABASE', payload: { question, imageId, answer, studentName } },
                 result => sendResponse(result)
             );
