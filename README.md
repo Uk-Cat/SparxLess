@@ -1,6 +1,9 @@
-README: SparxLess Installation
+SparxLess Installation
 
-V1.2.0
+V1.3.0 Alpha v5
+
+[<img src="https://img.youtube.com/vi/2TPXqmkxeZs/hqdefault.jpg" width="600" height="400"
+/>](https://www.youtube.com/embed/2TPXqmkxeZs)
 
 1. Project Structure
 Ensure your folder looks like this before proceeding:
