@@ -98,7 +98,7 @@ Future plans:
  - Adding a global answer database (so you get the answer without using ai, just from people who had that question before)
 
 All credits goes to:
-Ant - For compiling and testing the extension
+A - For compiling and testing the extension
 Gemini - For helping to make the UI
 Claude  - For implementing the text/image extractor
 
