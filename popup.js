@@ -154,30 +154,51 @@ document.addEventListener('DOMContentLoaded', async () => {
         };
     }
 
+    const providerKeys = {
+        google:    'googleApiKey',
+        openrouter:'openrouterApiKey'
+    };
+
+    const storedApiKeys = {
+        google:     '',
+        openrouter: ''
+    };
+
     const updateModelDropdown = (provider, selectedModelId) => {
         modelSelect.innerHTML = modelOptions[provider]
             .map(m => '<option value="' + m.id + '"' + (m.id === selectedModelId ? ' selected' : '') + '>' + m.name + '</option>')
             .join('');
     };
 
-    providerSelect.onchange = () => updateModelDropdown(providerSelect.value, null);
+    const updateApiKeyField = (provider) => {
+        apiKeyInput.value = storedApiKeys[provider] || '';
+    };
 
-    chrome.storage.sync.get(['apiKey', 'provider', 'selectedModel'], (data) => {
-        if (data.apiKey) apiKeyInput.value = data.apiKey;
-        if (data.provider) {
-            providerSelect.value = data.provider;
-            updateModelDropdown(data.provider, data.selectedModel);
-        } else {
-            updateModelDropdown('google', null);
-        }
+    providerSelect.onchange = () => {
+        updateModelDropdown(providerSelect.value, null);
+        updateApiKeyField(providerSelect.value);
+    };
+
+    chrome.storage.sync.get(['googleApiKey', 'openrouterApiKey', 'provider', 'selectedModel'], (data) => {
+        storedApiKeys.google     = data.googleApiKey     || '';
+        storedApiKeys.openrouter = data.openrouterApiKey || '';
+
+        const provider = data.provider || 'google';
+        providerSelect.value = provider;
+        updateModelDropdown(provider, data.selectedModel);
+        updateApiKeyField(provider);
     });
 
     saveSettings.onclick = () => {
-        chrome.storage.sync.set({
-            apiKey:        apiKeyInput.value,
-            provider:      providerSelect.value,
+        const provider = providerSelect.value;
+        const payload = {
+            provider:      provider,
             selectedModel: modelSelect.value
-        }, () => {
+        };
+        payload[providerKeys[provider]] = apiKeyInput.value;
+
+        chrome.storage.sync.set(payload, () => {
+            storedApiKeys[provider] = apiKeyInput.value;
             settingsPanel.style.display = 'none';
             alert('Settings Saved!');
         });
@@ -291,7 +312,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         const BOOKWORK_KEY = 'SparxLessBookwork';
         chrome.storage.local.get([BOOKWORK_KEY], (result) => {
             const store = result[BOOKWORK_KEY] || {};
-            const codes = Object.keys(store).sort();
+            const packageId = (function(url){
+                if (!url) return null;
+                const m = url.match(/\/package\/([^\/\?#]+)/i);
+                return m ? m[1] : null;
+            })(tab?.url) || '__global__';
+
+            // If package-specific data exists, use it; otherwise fall back to legacy flat structure
+            const packageStore = (store[packageId] && typeof store[packageId] === 'object') ? store[packageId] : store;
+            const codes = Object.keys(packageStore).sort();
 
             if (codes.length === 0) {
                 bookworkContent.innerHTML =
@@ -301,42 +330,67 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
 
             let html = '';
-            codes.forEach((code) => {
-                const entries = Array.isArray(store[code]) ? store[code] : [];
-                const latest  = entries
-                    .filter(e => e.answers && e.answers.length > 0)
-                    .sort((a, b) => b.date - a.date)[0];
-                if (!latest) return;
-
-                const answersStr = latest.answers.join(', ');
-                const dateStr    = new Date(latest.date).toLocaleString('en-GB', {
+            codes.forEach((code, idx) => {
+                const entries = Array.isArray(packageStore[code]) ? packageStore[code] : [];
+                if (entries.length === 0) return;
+                const sorted = entries.slice().sort((a,b) => b.date - a.date);
+                const latest = sorted[0];
+                const dateStr = new Date(latest.date).toLocaleString('en-GB', {
                     day: '2-digit', month: '2-digit', year: '2-digit',
                     hour: '2-digit', minute: '2-digit'
                 });
 
-                html +=
-                    '<div style="display:flex;align-items:center;justify-content:space-between;' +
-                    'padding:8px 10px;margin-bottom:6px;background:#f3f4f6;border-radius:6px;' +
-                    'border-left:3px solid #4f46e5;gap:8px;">' +
-                        '<div style="font-size:13px;font-weight:800;color:#4f46e5;min-width:28px;white-space:nowrap;">' +
-                            escapeHtml(code) +
-                        '</div>' +
-                        '<div style="font-size:13px;font-weight:600;color:#111827;flex:1;text-align:center;">' +
-                            escapeHtml(answersStr) +
-                        '</div>' +
-                        '<div style="font-size:10px;color:#9ca3af;white-space:nowrap;">' +
-                            escapeHtml(dateStr) +
-                        '</div>' +
-                    '</div>';
+                const panelId = 'bookwork-panel-' + idx + '-' + encodeURIComponent(code);
+
+                html += '<div style="margin-bottom:8px;">';
+                html += '<div class="code-header" data-panel="' + panelId + '" style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:#f3f4f6;border-radius:6px;border-left:3px solid #4f46e5;cursor:pointer;">';
+                html += '<div style="display:flex;align-items:center;gap:8px;"><div style="font-size:13px;font-weight:800;color:#4f46e5;min-width:28px;white-space:nowrap;">' + escapeHtml(code) + '</div><div style="font-size:12px;color:#6b7280;">' + sorted.length + ' item(s)</div></div>';
+                html += '<div style="font-size:10px;color:#9ca3af;white-space:nowrap;">' + escapeHtml(dateStr) + '</div>';
+                html += '</div>';
+
+                html += '<div id="' + panelId + '" class="code-entries" style="display:none;padding:8px 6px;">';
+                sorted.forEach(entry => {
+                    const answersStr = (entry.answers || []).join(', ');
+                    const q = entry.id || '';
+                    const entryDate = new Date(entry.date).toLocaleString('en-GB', {
+                        day: '2-digit', month: '2-digit', year: '2-digit',
+                        hour: '2-digit', minute: '2-digit'
+                    });
+                    html += '<div style="padding:8px 10px;margin-bottom:6px;background:#ffffff;border-radius:6px;border:1px solid #e6e6e6;">';
+                    html += '<div style="font-size:13px;font-weight:700;color:#111827;">' + escapeHtml(answersStr) + '</div>';
+                    html += '<div style="font-size:12px;color:#6b7280;margin-top:4px;">' + escapeHtml(q) + '</div>';
+                    html += '<div style="font-size:10px;color:#9ca3af;margin-top:6px;">' + escapeHtml(entryDate) + '</div>';
+                    html += '</div>';
+                });
+                html += '</div></div>';
             });
 
-            bookworkContent.innerHTML = html ||
-                '<p style="font-size:11px;color:#6b7280;text-align:center;">No answers recorded yet.</p>';
+            bookworkContent.innerHTML = html || '<p style="font-size:11px;color:#6b7280;text-align:center;">No answers recorded yet.</p>';
 
-            bookworkContent.innerHTML +=
-                '<button id="clear-bookwork-btn" style="width:100%;margin-top:8px;padding:6px;' +
-                'background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;border-radius:4px;' +
-                'font-size:10px;font-weight:bold;cursor:pointer;">CLEAR ALL SAVED ANSWERS</button>';
+            // Add clear buttons: Clear package and Clear all
+            bookworkContent.innerHTML += '<div style="display:flex;gap:8px;margin-top:8px;"><button id="clear-package-btn" style="flex:1;padding:6px;background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;border-radius:4px;font-size:10px;font-weight:bold;cursor:pointer;">CLEAR PACKAGE</button><button id="clear-bookwork-btn" style="flex:1;padding:6px;background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;border-radius:4px;font-size:10px;font-weight:bold;cursor:pointer;">CLEAR ALL SAVED ANSWERS</button></div>';
+
+            // Wire up toggles
+            document.querySelectorAll('.code-header').forEach(h => {
+                h.addEventListener('click', () => {
+                    const panelId = h.getAttribute('data-panel');
+                    const panel = document.getElementById(panelId);
+                    if (!panel) return;
+                    panel.style.display = (panel.style.display === 'none') ? 'block' : 'none';
+                });
+            });
+
+            const clearPkgBtn = document.getElementById('clear-package-btn');
+            if (clearPkgBtn) {
+                clearPkgBtn.addEventListener('click', () => {
+                    if (!confirm('Clear saved answers for this package?')) return;
+                    chrome.storage.local.get([BOOKWORK_KEY], (res) => {
+                        const st = res[BOOKWORK_KEY] || {};
+                        delete st[packageId];
+                        chrome.storage.local.set({ [BOOKWORK_KEY]: st }, () => renderBookworkHistory());
+                    });
+                });
+            }
 
             const clearBtn = document.getElementById('clear-bookwork-btn');
             if (clearBtn) {
@@ -356,8 +410,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             return;
         }
 
-        chrome.storage.sync.get(['apiKey', 'provider', 'selectedModel'], (config) => {
-            if (!config.apiKey) { alert('Please set your API Key in Settings!'); return; }
+        chrome.storage.sync.get(['googleApiKey', 'openrouterApiKey', 'provider', 'selectedModel'], (config) => {
+            const provider = config.provider || 'google';
+            const apiKey = config[providerKeys[provider]] || '';
+            if (!apiKey) { alert('Please set your API Key in Settings for ' + provider + '!'); return; }
 
             solveBtn.disabled = true;
             solveBtn.innerText = 'THINKING...';
@@ -374,12 +430,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             let url, options;
 
-            if (config.provider === 'openrouter') {
+            if (provider === 'openrouter') {
                 url = 'https://openrouter.ai/api/v1/chat/completions';
                 options = {
                     method: 'POST',
                     headers: {
-                        'Authorization': 'Bearer ' + config.apiKey,
+                        'Authorization': 'Bearer ' + apiKey,
                         'Content-Type': 'application/json',
                         'X-Title': 'SparxLess AI'
                     },
@@ -387,7 +443,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 };
             } else {
                 url = 'https://generativelanguage.googleapis.com/v1beta/models/' +
-                      config.selectedModel + ':generateContent?key=' + config.apiKey;
+                      config.selectedModel + ':generateContent?key=' + apiKey;
                 options = {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -399,7 +455,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 .then(res => res.json())
                 .then(json => {
                     if (json.error) throw new Error(json.error.message || 'API Error');
-                    const rawText = config.provider === 'openrouter'
+                    const rawText = provider === 'openrouter'
                         ? json.choices[0].message.content
                         : json.candidates[0].content.parts[0].text;
                     const cleanAnswer = extractAnswer(rawText);

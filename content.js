@@ -171,6 +171,14 @@ function extractImageId(url) {
     return match ? match[0] : null;
 }
 
+// Extracts the package id from the current URL if present (e.g. /package/<id>/)
+function getPackageIdFromUrl(url = location.href) {
+    if (!url) return null;
+    const m = url.match(/\/package\/([^\/\?#]+)/i);
+    if (!m) return null;
+    return m[1];
+}
+
 // ─── ANSWER EXTRACTION ───────────────────────────────────────────────────────
 
 function getCurrentAnswer() {
@@ -378,18 +386,24 @@ async function saveCurrentAnswer() {
     if (!code || !questionText || answers.length === 0) return;
 
     const normalise = str => str.replace(/\$.*?\$/g, '').replace(/ +/g, ' ').trim();
+    const packageId = getPackageIdFromUrl() || '__global__';
     const store     = await getBookworkStore();
-    const existing  = Array.isArray(store[code]) ? store[code] : [];
+
+    // Ensure package namespace exists
+    if (!store[packageId] || typeof store[packageId] !== 'object') store[packageId] = {};
+
+    const existing  = Array.isArray(store[packageId][code]) ? store[packageId][code] : [];
     const filtered  = existing.filter(entry => normalise(entry.id) !== normalise(questionText));
     filtered.unshift({ id: questionText, answers, date: Date.now() });
-    store[code] = filtered;
+    store[packageId][code] = filtered;
+
     await setBookworkStore(store);
 }
 
 // ─── INTERACTION HANDLER ──────────────────────────────────────────────────────
 
 function onInteraction() {
-    saveCurrentAnswer();
+    // Only record transient pending state on interactions. Only save confirmed answers when the question is marked correct.
     savePending();
 }
 
@@ -502,12 +516,18 @@ function runBookworkCheck() {
     console.log('[SparxLess] Bookwork check detected, code:', code);
 
     getBookworkStore().then(store => {
-        const entries = Array.isArray(store[code])
-            ? store[code].filter(e => Array.isArray(e.answers) && e.answers.length > 0)
-            : [];
+        const packageId = getPackageIdFromUrl() || '__global__';
+
+        // Prefer package-specific entries, then fall back to legacy top-level entries
+        let entries = [];
+        if (store[packageId] && Array.isArray(store[packageId][code])) {
+            entries = store[packageId][code].filter(e => Array.isArray(e.answers) && e.answers.length > 0);
+        } else if (Array.isArray(store[code])) {
+            entries = store[code].filter(e => Array.isArray(e.answers) && e.answers.length > 0);
+        }
 
         if (entries.length === 0) {
-            console.log('[SparxLess] No saved answers for bookwork code:', code);
+            console.log('[SparxLess] No saved answers for bookwork code:', code, 'package:', packageId);
             return;
         }
 
@@ -579,6 +599,45 @@ function autoSubmitCorrectAnswer() {
         console.log('[SparxLess] Image ID :', imageId);
         console.log('[SparxLess] Answer   :', answer);
 
+        // Save confirmed bookwork locally (only on correct)
+        try {
+            const code = pending?.bookworkCode || getCurrentBookworkCode() || getBookworkCodeFromDOM();
+            const packageId = getPackageIdFromUrl() || '__global__';
+            if (code) {
+                getBookworkStore().then(store => {
+                    if (!store[packageId] || typeof store[packageId] !== 'object') store[packageId] = {};
+                    const existing = Array.isArray(store[packageId][code]) ? store[packageId][code] : [];
+                    const normalise = s => String(s).replace(/\$.*?\$/g, '').replace(/ +/g,' ').trim();
+                    const qText = question || display?.text || getCurrentQuestionText();
+                    const answersArr = [];
+                    if (Array.isArray(answer)) answersArr.push(...answer);
+                    else if (answer) answersArr.push(answer);
+                    else if (pending?.answer) {
+                        if (Array.isArray(pending.answer)) answersArr.push(...pending.answer);
+                        else answersArr.push(pending.answer);
+                    }
+                    // fallback to reading current page answer if none captured
+                    if (answersArr.length === 0) {
+                        const cur = getCurrentAnswer();
+                        if (cur) answersArr.push(cur);
+                    }
+                    if (answersArr.length === 0) {
+                        console.log('[SparxLess] No answer detected; skipping local save for code', code, 'package', packageId);
+                        return;
+                    }
+                    const filtered = existing.filter(entry => normalise(entry.id) !== normalise(qText));
+                    filtered.unshift({ id: qText, answers: answersArr, date: Date.now() });
+                    store[packageId][code] = filtered;
+                    setBookworkStore(store);
+                    console.log('[SparxLess] Saved confirmed bookwork locally for code', code, 'package', packageId);
+                }).catch(e => console.warn('[SparxLess] Saving confirmed bookwork failed:', e));
+            } else {
+                console.log('[SparxLess] No bookwork code found; skipping local save.');
+            }
+        } catch (e) {
+            console.warn('[SparxLess] Saving confirmed bookwork threw:', e);
+        }
+
         // Submit the answer — Confirmed? stays false until a second user agrees
         safeRuntimeSendMessage({
             action: 'POST_TO_SUPABASE',
@@ -628,10 +687,12 @@ const correctObserver = new MutationObserver(() => {
     const resultEl = document.querySelector('[class*="_ResultMessage_"]');
     if (!resultEl) return;
     const msg = resultEl.innerText?.trim();
-    if (msg === 'Correct!') {
+    if (!msg) return;
+    const lower = msg.toLowerCase();
+    if (lower.includes('correct')) {
         clearTimeout(correctDebounceTimer);
         correctDebounceTimer = setTimeout(autoSubmitCorrectAnswer, 300);
-    } else if (WRONG_ANSWER_MESSAGES.some(w => msg?.includes(w))) {
+    } else if (WRONG_ANSWER_MESSAGES.some(w => lower.includes(w.toLowerCase()))) {
         clearTimeout(correctDebounceTimer);
         correctDebounceTimer = setTimeout(autoDeleteWrongAnswer, 300);
     }
@@ -873,8 +934,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         performAutoSolve(request.answer);
 
     } else if (request.action === 'getBookworkAnswers') {
+        const packageId = getPackageIdFromUrl() || '__global__';
         getBookworkStore().then(store => {
-            sendResponse({ answers: store[request.code] || [] });
+            const pkg = store[packageId] || {};
+            const answers = Array.isArray(pkg[request.code]) ? pkg[request.code] : (Array.isArray(store[request.code]) ? store[request.code] : []);
+            sendResponse({ answers });
         });
         return true;
 
