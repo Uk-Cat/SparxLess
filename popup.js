@@ -231,8 +231,71 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     });
 
-    // ── Tab ────────────────────────────────────────────────────────────────────
+    // ── Tab (MUST be defined before timer code that uses it) ────────────────────
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+    // ── Timer toggle ──────────────────────────────────────────────────────────
+    const timerToggle      = document.getElementById('toggle-timer');
+    const moveTimerBtn     = document.getElementById('move-timer-btn');
+
+    const TIMER_ENABLED_KEY = 'SparxLessTimerEnabled';
+
+    // Load saved timer state (default: enabled)
+    chrome.storage.sync.get([TIMER_ENABLED_KEY], (data) => {
+        const enabled = data[TIMER_ENABLED_KEY] !== false;
+        timerToggle.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+    });
+
+    timerToggle.addEventListener('click', () => {
+        const current = timerToggle.getAttribute('aria-pressed') === 'true';
+        const next = !current;
+        timerToggle.setAttribute('aria-pressed', next ? 'true' : 'false');
+        chrome.storage.sync.set({ [TIMER_ENABLED_KEY]: next }, () => {
+            // Notify the content script on the active tab
+            if (tab && tab.id) {
+                chrome.tabs.sendMessage(tab.id, { action: 'TIMER_TOGGLE', enabled: next }).catch(() => {});
+            }
+        });
+    });
+
+    moveTimerBtn.addEventListener('click', () => {
+        if (tab && tab.id) {
+            chrome.tabs.sendMessage(tab.id, { action: 'TIMER_ENTER_MOVE' }).catch(() => {});
+        }
+    });
+
+    // ── Timer location toggle (banner ↔ floating) ──
+    const TIMER_LOCATION_KEY = 'SparxLessTimerLocation';
+    const toggleLocationBtn = document.getElementById('toggle-timer-location-btn');
+    let currentTimerLocation = 'floating'; // default
+
+    function updateLocationButton(location) {
+        currentTimerLocation = location;
+        if (location === 'banner') {
+            toggleLocationBtn.textContent = 'Back to Floating';
+        } else {
+            toggleLocationBtn.textContent = 'Move to Top Banner';
+        }
+    }
+
+    // Read saved location from chrome.storage.local
+    chrome.storage.local.get([TIMER_LOCATION_KEY], (data) => {
+        const loc = data[TIMER_LOCATION_KEY] || 'floating';
+        updateLocationButton(loc);
+    });
+
+    toggleLocationBtn.addEventListener('click', () => {
+        if (!tab || !tab.id) return;
+        if (currentTimerLocation === 'floating') {
+            chrome.tabs.sendMessage(tab.id, { action: 'TIMER_MOVE_TO_BANNER' }).catch(() => {});
+            updateLocationButton('banner');
+            chrome.storage.local.set({ [TIMER_LOCATION_KEY]: 'banner' });
+        } else {
+            chrome.tabs.sendMessage(tab.id, { action: 'TIMER_MOVE_TO_FLOATING' }).catch(() => {});
+            updateLocationButton('floating');
+            chrome.storage.local.set({ [TIMER_LOCATION_KEY]: 'floating' });
+        }
+    });
 
     // ── Database lookup → result card ──────────────────────────────────────────
     function lookupAndShowResult(questionText, imageUrl) {

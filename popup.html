@@ -44,6 +44,19 @@
                     </button>
                 </div>
             </div>
+            <div class="input-group" style="margin-top:8px;padding-top:8px;border-top:1.5px solid var(--border);">
+                <label>Session Timer</label>
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;">
+                    <span style="font-size:12px;font-weight:600;color:var(--text-muted);">Show session timer</span>
+                    <button id="toggle-timer" class="toggle-switch" aria-pressed="true">
+                        <span class="toggle-knob"></span>
+                    </button>
+                </div>
+                <div style="display:flex;gap:6px;margin-top:8px;">
+                    <button id="move-timer-btn" class="secondary-btn" style="flex:1;">Move Timer</button>
+                    <button id="toggle-timer-location-btn" class="secondary-btn" style="flex:1;">Move to Top Banner</button>
+                </div>
+            </div>
             <button id="save-settings" class="primary-btn">Apply Changes</button>
         </div>
 
@@ -77,7 +90,7 @@
             </div>
 
             <!-- Solve -->
-            <button id="solve-btn" class="solve-btn">✦ Solve Problem</button>
+            <button id="solve-btn" class="solve-btn">&#10022; Solve Problem</button>
 
 
 

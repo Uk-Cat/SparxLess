@@ -25,7 +25,7 @@
   "content_scripts": [
     {
       "matches": ["https://*.sparx-learning.com/*"],
-      "js": ["content.js"]
+      "js": ["content.js", "timer.js"]
     }
   ]
 }
